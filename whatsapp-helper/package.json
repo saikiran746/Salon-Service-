@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-helper",
+  "version": "1.0.0",
+  "description": "Windows Desktop Helper for Salon Management System WhatsApp Automation",
+  "main": "helper.js",
+  "scripts": {
+    "start": "node helper.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
