@@ -403,7 +403,7 @@ async function initializePostgresSchema(pool) {
     
     // 1. Seed super admin
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@luxesalon.com';
-    const [adminRow] = await pool.execute('SELECT * FROM users WHERE email = ?', [adminEmail]);
+    const [adminRow] = await pool.execute("SELECT * FROM users WHERE id = 'admin-001'");
     if (adminRow.length === 0) {
       const adminPass = await bcrypt.hash(process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123456', 12);
       await pool.execute(
