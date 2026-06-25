@@ -73,3 +73,6 @@ env/
 Thumbs.db
 .vscode/
 .idea/
+
+# Database backups
+*.json
