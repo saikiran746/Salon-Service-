@@ -599,11 +599,38 @@ const getMembershipGrowthChart = async (req, res, next) => {
     next(error);
   }
 };
+const deleteCustomer = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const [custRows] = await pool.execute('SELECT * FROM customers WHERE id = ?', [id]);
+    if (custRows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found' });
+    
+    const customer = custRows[0];
+    // Delete associated appointments and bills first to prevent foreign key constraint errors
+    await pool.execute('DELETE FROM appointments WHERE customer_id = ?', [id]);
+    const [bills] = await pool.execute('SELECT id FROM bills WHERE customer_id = ?', [id]);
+    if (bills.length > 0) {
+      const billIds = bills.map(b => `'${b.id}'`).join(',');
+      await pool.execute(`DELETE FROM bill_items WHERE bill_id IN (${billIds})`);
+      await pool.execute('DELETE FROM bills WHERE customer_id = ?', [id]);
+    }
+    
+    await pool.execute('DELETE FROM customers WHERE id = ?', [id]);
+    if (customer.user_id) {
+      await pool.execute('DELETE FROM users WHERE id = ?', [customer.user_id]);
+    }
+    
+    res.json({ success: true, message: 'Customer deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+};
 
 module.exports = { 
   getAllCustomers, 
   getCustomerById, 
   updateCustomer, 
+  deleteCustomer,
   getMyProfile, 
   updateMyProfile, 
   getCustomerStats, 

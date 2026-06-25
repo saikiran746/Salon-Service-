@@ -114,13 +114,17 @@ export const safeJSON = (str, fallback = null) => {
 /**
  * Generate time slots with a specific interval (in minutes)
  */
-export const generateTimeSlots = (intervalMinutes = 30) => {
+export const generateTimeSlots = (intervalMinutes = 30, openTime = '09:00', closeTime = '20:00') => {
   const slots = [];
-  const startHour = 9; // 09:00
-  const endHour = 19; // 19:00 limit
   
-  let currentMins = startHour * 60;
-  const endMins = endHour * 60;
+  const parseTime = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return (h * 60) + (m || 0);
+  };
+
+  let currentMins = parseTime(openTime);
+  const endMins = parseTime(closeTime);
   
   while (currentMins < endMins) {
     const h = Math.floor(currentMins / 60);

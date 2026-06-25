@@ -65,6 +65,7 @@ export const authAPI = {
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword: (data) => api.post('/auth/reset-password', data),
   changePassword: (data) => api.put('/auth/change-password', data),
+  setPassword: (data) => api.put('/auth/set-password', data),
   getAdminActivity: () => api.get('/auth/admin/activity'),
   // One-time magic login from security alert email
   adminMagicLogin: (token) => api.get(`/auth/admin/magic-login?token=${token}`),
@@ -114,6 +115,7 @@ export const customersAPI = {
   getBookingSourcesChart: () => api.get('/customers/booking-sources-chart'),
   getMembershipGrowthChart: () => api.get('/customers/membership-growth-chart'),
   update: (id, data) => api.put(`/customers/${id}`, data),
+  delete: (id) => api.delete(`/customers/${id}`),
   getMyProfile: () => api.get('/customers/me'),
   updateMyProfile: (data) => api.put('/customers/me', data),
 };
@@ -125,7 +127,9 @@ export const billingAPI = {
   getMyBills: () => api.get('/billing/my'),
   create: (data) => api.post('/billing', data),
   downloadInvoice: (id) => api.get(`/billing/${id}/download`, { responseType: 'blob' }),
+  delete: (id) => api.delete(`/billing/${id}`),
 };
+
 
 // ==================== ANALYTICS ====================
 export const analyticsAPI = {
@@ -212,6 +216,7 @@ export const settingsAPI = {
   changeAdminCredentials: (data) => api.post('/settings/change-credentials', data),
   requestEmailOtp: (data) => api.post('/settings/request-email-otp', data),
   verifyEmailOtp: (data) => api.post('/settings/verify-email-otp', data),
+  requestCredChangeOtp: (data) => api.post('/settings/request-cred-otp', data),
 };
 
 // ==================== WHATSAPP AUTOMATION ====================

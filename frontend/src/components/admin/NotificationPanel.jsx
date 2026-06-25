@@ -135,14 +135,13 @@ function NotifDetailModal({ notif, onClose }) {
     }
   }, []);
 
-  const handleAction = async (status) => {
-    try {
-      await appointmentsAPI.update(parsed.appointmentId, { status });
-      toast.success(`Appointment ${status === 'confirmed' ? 'Accepted' : 'Rejected'}!`);
-      onClose();
-    } catch {
+  const handleAction = (status) => {
+    toast.success(`Appointment ${status === 'confirmed' ? 'Accepted' : 'Rejected'}!`);
+    onClose();
+
+    appointmentsAPI.update(parsed.appointmentId, { status }).catch(() => {
       toast.error('Failed to update appointment.');
-    }
+    });
   };
 
   // Determine displayed details
@@ -320,20 +319,21 @@ export default function NotificationPanel({ open, onClose, notifs = [], setNotif
   };
 
   const markRead = (id) => {
-    notificationsAPI.markRead(id).then(() =>
-      setNotifs(notifs.map(n => n.id === id ? { ...n, is_read: 1 } : n))
-    );
+    setNotifs(prev => prev.map(n => n.id === id ? { ...n, is_read: 1 } : n));
+    notificationsAPI.markRead(id).catch(() => {});
   };
 
-  const handleActionInline = async (e, status, appointmentId, notifId) => {
+  const handleActionInline = (e, status, appointmentId, notifId) => {
     e.stopPropagation();
-    try {
-      await appointmentsAPI.update(appointmentId, { status });
-      toast.success(`Appointment ${status === 'confirmed' ? 'Accepted' : 'Rejected'}!`);
-      markRead(notifId);
-    } catch {
-      toast.error('Failed to update appointment.');
-    }
+    
+    // Optimistic UI updates
+    markRead(notifId);
+    toast.success(`Appointment ${status === 'confirmed' ? 'Accepted' : 'Rejected'}!`);
+
+    // API call in background
+    appointmentsAPI.update(appointmentId, { status }).catch(() => {
+      toast.error('Failed to update appointment. It may have already been updated.');
+    });
   };
 
   const handleNotifClick = (notif) => {

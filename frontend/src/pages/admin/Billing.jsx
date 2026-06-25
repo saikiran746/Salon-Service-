@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import AdminLayout from '../../components/admin/AdminLayout';
 import { billingAPI, customersAPI, servicesAPI, membershipsAPI, authAPI, staffAPI, whatsappAPI } from '../../services/api';
-import { Plus, Download, X, Search, User, Shield, Sparkles, Check, Crown, Phone, ArrowRight, Wallet, CreditCard, Landmark, CheckCircle, Eye, Mail } from 'lucide-react';
+import { Plus, Download, X, Search, User, Shield, Sparkles, Check, Crown, Phone, ArrowRight, Wallet, CreditCard, Landmark, CheckCircle, Eye, Mail, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const getLocalDateString = () => {
@@ -41,6 +41,7 @@ export default function AdminBilling() {
   const [showQuickAddCust, setShowQuickAddCust] = useState(false);
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddEmail, setQuickAddEmail] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
   
   // Inline membership modal
   const [showMembershipModal, setShowMembershipModal] = useState(false);
@@ -69,8 +70,7 @@ export default function AdminBilling() {
 
   // Settle & Calculation states
   const [addedItems, setAddedItems] = useState([]);
-  const [discountType, setDiscountType] = useState('percent'); // 'percent' or 'value'
-  const [discountValue, setDiscountValue] = useState(0);
+
   const [gstPercent, setGstPercent] = useState(5); // Default 5%, editable
   const [paymentMode, setPaymentMode] = useState('cash'); // 'cash', 'card', 'upi', 'wallet', 'split'
   
@@ -160,6 +160,19 @@ export default function AdminBilling() {
 
   useEffect(loadBills, [filters]);
 
+  const handleDeleteBill = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this bill? This action cannot be undone.")) return;
+    try {
+      await billingAPI.delete(id);
+      toast.success('Bill deleted successfully');
+      loadBills();
+      // If we had appointments loaded in this component, we'd reload them.
+      // But since they are loaded elsewhere or in POS sidebar, we let the user know.
+    } catch (error) {
+      toast.error('Failed to delete bill');
+    }
+  };
+
   useEffect(() => {
     // Load services for searchable selector
     servicesAPI.getAll({ is_active: 1 }).then(r => setDbServices(r.data.data)).catch(() => {});
@@ -242,11 +255,11 @@ export default function AdminBilling() {
     if (selectedCustomer) {
       const disc = selectedCustomer.discount || selectedCustomer.membership_discount || 0;
       if (disc > 0) {
-        setDiscountType('percent');
-        setDiscountValue(disc);
+        setAddedItems(prev => prev.map(item => ({ 
+          ...item, 
+          discount_percentage: item.discount_percentage > 0 ? item.discount_percentage : disc 
+        })));
       }
-    } else {
-      setDiscountValue(0);
     }
   }, [selectedCustomer]);
 
@@ -254,17 +267,9 @@ export default function AdminBilling() {
   const handleQuickAddCustomer = async () => {
     if (!quickAddName) return toast.error('Customer name is required');
     if (mobileSearch.length !== 10) return toast.error('Mobile number must be exactly 10 digits');
+    setSavingProfile(true);
     try {
       const email = quickAddEmail || `walkin_${mobileSearch}@luxesalon.local`;
-      const res = await customersAPI.getAll({ limit: 1 }); // just to call axios/endpoints
-      // We call customer profile creation. Let's register a customer through API
-      // Since it's done via standard user register or admin creating customer, let's make an API call
-      // Wait, we can create customer by calling auth registration or updating customer DB. Let's see:
-      // In backend/src/controllers/customers.js there is no direct customer creation endpoint. But let's check if there is!
-      // Actually, registering a user creates a customer. But we can register the customer.
-      // Let's create an admin customer create endpoint if needed, or register them.
-      // Wait, register customer can be done using authAPI.register!
-      // Let's check authAPI.register:
       const reg = await authAPI.register({
         name: quickAddName,
         email,
@@ -272,20 +277,23 @@ export default function AdminBilling() {
         password: 'User@123456', // temporary password
         gender: selectedGender || undefined
       });
-      toast.success('Customer profile created!');
-      // Load user profile details
-      const matchId = reg.data.data.user.id;
-      customersAPI.getAll({ search: mobileSearch }).then(cRes => {
-        const profile = cRes.data.data.find(c => c.phone === mobileSearch);
-        if (profile) {
-          customersAPI.getById(profile.id).then(res => {
-            setSelectedCustomer(res.data.data);
-            setShowQuickAddCust(false);
-          });
-        }
-      });
+      
+      toast.success('Customer Profile Saved & Linked!');
+      // After registration, the customer is created. Fetch it:
+      const fetchNew = await customersAPI.getAll({ search: mobileSearch });
+      if (fetchNew.data.data.length > 0) {
+        setSelectedCustomer(fetchNew.data.data[0]);
+      }
+      setShowQuickAddCust(false);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to create customer profile.');
+      // Check if user already exists
+      if (err.response?.data?.message?.includes('already registered')) {
+        toast.error('Number already registered! Try searching again.');
+      } else {
+        toast.error('Failed to create customer profile');
+      }
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -298,7 +306,8 @@ export default function AdminBilling() {
       await membershipsAPI.purchase({
         plan_id: purchasingMembershipId,
         customer_id: selectedCustomer.id,
-        payment_method: 'cash'
+        payment_method: 'cash',
+        skip_invoice: true
       });
       toast.success('Membership activated successfully!');
       setShowMembershipModal(false);
@@ -377,7 +386,7 @@ export default function AdminBilling() {
       description: serviceSearchQuery,
       quantity: parseInt(serviceQty) || 1,
       price: parseFloat(servicePrice),
-      discount_percentage: 0,
+      discount_percentage: selectedCustomer ? (selectedCustomer.discount || selectedCustomer.membership_discount || 0) : 0,
       stylist: stylist?.name || '',
       service_id: selectedServiceInput?.id || null,
       staff_id: selectedStylistId || null
@@ -410,13 +419,7 @@ export default function AdminBilling() {
 
   const netAmount = Math.max(0, subtotal - serviceDiscountTotal);
 
-  const billDiscountAmount = discountType === 'percent' 
-    ? (netAmount * (parseFloat(discountValue) || 0)) / 100 
-    : (parseFloat(discountValue) || 0);
-
-  const discountAmount = billDiscountAmount;
-
-  const taxableAmount = Math.max(0, netAmount - billDiscountAmount);
+  const taxableAmount = Math.max(0, netAmount);
   const gstAmount = taxableAmount * (parseFloat(gstPercent) || 0) / 100;
   const grandTotal = taxableAmount + gstAmount;
 
@@ -463,8 +466,8 @@ export default function AdminBilling() {
           stylist: it.stylist
         })),
         subtotal: subtotal,
-        discount_percent: discountType === 'percent' ? parseFloat(discountValue) : 0,
-        discount_amount: discountAmount,
+        discount_percent: 0,
+        discount_amount: 0,
         tax_percent: parseFloat(gstPercent),
         tax_amount: gstAmount,
         total_amount: grandTotal,
@@ -511,7 +514,6 @@ _TONI & GUY Essensuals Team_`;
 
       // Reset bill creator POS values
       setAddedItems([]);
-      setDiscountValue(0);
       setGstPercent(5);
       setPaymentMode('cash');
       setAppointmentId(null);
@@ -671,6 +673,13 @@ _TONI & GUY Essensuals Team_`;
                   >
                     <Eye size={15} />
                   </button>
+                  <button 
+                    onClick={() => handleDeleteBill(b.id)} 
+                    className="text-salon-muted hover:text-red-500 transition-colors" 
+                    title="Delete invoice"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </td>
               </tr>
             ))}
@@ -815,9 +824,14 @@ _TONI & GUY Essensuals Team_`;
                     <button 
                       type="button" 
                       onClick={handleQuickAddCustomer}
-                      className="btn-gold text-[10px] font-sans font-bold tracking-widest uppercase px-4 py-2"
+                      disabled={savingProfile}
+                      className="btn-gold text-[10px] font-sans font-bold tracking-widest uppercase px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                     >
-                      Save Profile & Link
+                      {savingProfile ? (
+                        <div className="w-3 h-3 border-2 border-salon-black/30 border-t-salon-black rounded-full animate-spin"></div>
+                      ) : (
+                        'Save Profile & Link'
+                      )}
                     </button>
                   </div>
                 )}
@@ -1015,7 +1029,26 @@ _TONI & GUY Essensuals Team_`;
                         return (
                           <tr key={item.id} className="border-b border-salon-border/20 hover:bg-salon-black/20">
                             <td className="px-4 py-3 text-xs font-semibold text-salon-white">{item.description}</td>
-                            <td className="px-4 py-3 text-xs text-salon-muted">{item.stylist || 'N/A'}</td>
+                            <td className="px-4 py-3 text-xs text-salon-muted">
+                              <select
+                                value={item.staff_id || ''}
+                                onChange={(e) => {
+                                  const sid = e.target.value;
+                                  const sName = dbStaff.find(s => s.id === sid)?.name || '';
+                                  setAddedItems(prev => {
+                                    const updated = [...prev];
+                                    updated[idx] = { ...updated[idx], staff_id: sid, stylist: sName };
+                                    return updated;
+                                  });
+                                }}
+                                className="input-dark w-24 text-xs py-1 px-1 bg-salon-dark border border-salon-border/60 rounded"
+                              >
+                                <option value="">N/A</option>
+                                {dbStaff.map(st => (
+                                  <option key={st.id} value={st.id}>{st.name}</option>
+                                ))}
+                              </select>
+                            </td>
                             <td className="px-4 py-3 text-xs font-sans text-center">{item.quantity}</td>
                             <td className="px-4 py-3 text-xs font-sans">₹{item.price.toFixed(2)}</td>
                             <td className="px-4 py-3 text-xs font-sans">
@@ -1060,28 +1093,6 @@ _TONI & GUY Essensuals Team_`;
                 {/* Real-time Calculation Inputs */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   
-                  {/* Discount input with dual support % and Rupee */}
-                  <div>
-                    <label className="label-gold">Discount Type & Value</label>
-                    <div className="flex">
-                      <select 
-                        value={discountType} 
-                        onChange={e => { setDiscountType(e.target.value); setDiscountValue(0); }} 
-                        className="input-dark w-20 text-xs rounded-r-none border-r-0 font-sans"
-                      >
-                        <option value="percent">% Percent</option>
-                        <option value="value">₹ Flat Amount</option>
-                      </select>
-                      <input 
-                        type="number" 
-                        min={0}
-                        max={discountType === 'percent' ? 100 : subtotal}
-                        value={discountValue} 
-                        onChange={e => setDiscountValue(parseFloat(e.target.value) || 0)} 
-                        className="input-dark rounded-l-none text-xs" 
-                      />
-                    </div>
-                  </div>
 
                   {/* GST Editable Input */}
                   <div>
@@ -1262,7 +1273,7 @@ _TONI & GUY Essensuals Team_`;
                   </div>
                   <div className="flex justify-between text-red-400">
                     <span className="text-salon-muted">Total Discount:</span>
-                    <span className="text-red-400">-₹{(serviceDiscountTotal + billDiscountAmount).toFixed(2)}</span>
+                    <span className="text-red-400">-₹{serviceDiscountTotal.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-salon-muted">Net Amount:</span>
@@ -1324,12 +1335,14 @@ _TONI & GUY Essensuals Team_`;
                 <select 
                   value={purchasingMembershipId} 
                   onChange={e => {
-                    setPurchasingMembershipId(e.target.value);
-                    // Autofill discount value in POS with selected membership discount if desired
-                    const plan = dbMembershipPlans.find(p => p.id === e.target.value);
+                    const planId = e.target.value;
+                    setPurchasingMembershipId(planId);
+                    const plan = dbMembershipPlans.find(p => p.id === planId);
                     if (plan) {
-                      setDiscountType('percent');
-                      setDiscountValue(plan.discount);
+                      setAddedItems(prev => prev.map(item => ({ 
+                        ...item, 
+                        discount_percentage: plan.discount 
+                      })));
                     }
                   }} 
                   className="input-dark font-sans text-xs"

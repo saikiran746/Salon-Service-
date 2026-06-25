@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { appointmentsAPI, billingAPI, customersAPI } from '../../services/api';
+import { authAPI, appointmentsAPI, billingAPI, customersAPI } from '../../services/api';
 import { formatTime } from '../../utils/helpers';
 import Navbar from '../../components/common/Navbar';
 import Footer from '../../components/common/Footer';
-import { Calendar, Receipt, Crown as CrownIcon, User, LogOut, X, Download, Edit2, Save } from 'lucide-react';
+import { Calendar, Receipt, Crown as CrownIcon, User, LogOut, X, Download, Edit2, Save, Lock, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const STATUS_BADGE = {
@@ -29,6 +29,10 @@ export default function ClientDashboard() {
   const [loading, setLoading] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', phone: '' });
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -60,6 +64,20 @@ export default function ClientDashboard() {
       const bls = await billingAPI.getMyBills();
       setBills(bls.data.data);
     } catch { toast.error('Failed to update profile.'); }
+  };
+
+  const handleSetPassword = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) {
+      return toast.error('Passwords do not match!');
+    }
+    try {
+      await authAPI.setPassword({ newPassword });
+      setIsSettingPassword(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      toast.success('Password set successfully! You can now log in with email and password.');
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed to set password.'); }
   };
 
   const cancelAppointment = async (id) => {
@@ -274,6 +292,65 @@ export default function ClientDashboard() {
                         <span className="text-salon-white text-base sm:text-sm font-body font-medium">{value}</span>
                       </div>
                     ))}
+                    <div className="pt-6 border-t border-white/5 mt-6">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                        <div>
+                          <h3 className="text-salon-white font-sans font-medium text-sm">Account Security</h3>
+                          <p className="text-salon-muted text-xs font-body mt-1">Set a password if you signed in with Google, or update your existing password.</p>
+                        </div>
+                        {!isSettingPassword && (
+                          <button onClick={() => setIsSettingPassword(true)} className="btn-outline-gold py-2 px-4 text-[10px] tracking-wider shrink-0 w-full sm:w-auto flex items-center justify-center gap-2">
+                            <Lock size={12} /> ADD / UPDATE PASSWORD
+                          </button>
+                        )}
+                      </div>
+
+                      {isSettingPassword && (
+                        <form onSubmit={handleSetPassword} className="mt-4 p-4 bg-salon-black/40 border border-white/5 rounded-lg space-y-4">
+                          <div className="space-y-3">
+                            <div className="relative">
+                              <label className="text-salon-muted text-[10px] font-sans tracking-widest uppercase mb-1.5 block">New Password</label>
+                              <div className="relative">
+                                <input 
+                                  type={showPassword ? 'text' : 'password'} 
+                                  value={newPassword} 
+                                  onChange={e => setNewPassword(e.target.value)} 
+                                  minLength={6}
+                                  placeholder="Minimum 6 characters"
+                                  className="w-full bg-salon-black/50 border border-white/10 p-3 pr-10 text-salon-white text-sm rounded-lg focus:border-gold-500/50 outline-none transition-colors" 
+                                  required 
+                                />
+                                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-salon-muted hover:text-salon-white transition-colors">
+                                  {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="relative">
+                              <label className="text-salon-muted text-[10px] font-sans tracking-widest uppercase mb-1.5 block">Confirm Password</label>
+                              <div className="relative">
+                                <input 
+                                  type={showPassword ? 'text' : 'password'} 
+                                  value={confirmPassword} 
+                                  onChange={e => setConfirmPassword(e.target.value)} 
+                                  minLength={6}
+                                  placeholder="Confirm your password"
+                                  className="w-full bg-salon-black/50 border border-white/10 p-3 pr-10 text-salon-white text-sm rounded-lg focus:border-gold-500/50 outline-none transition-colors" 
+                                  required 
+                                />
+                                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-salon-muted hover:text-salon-white transition-colors">
+                                  {showPassword ? <Eye size={16} /> : <EyeOff size={16} />}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex gap-3 pt-2">
+                            <button type="button" onClick={() => { setIsSettingPassword(false); setNewPassword(''); setConfirmPassword(''); }} className="btn-dark flex-1 py-2.5 text-[10px] uppercase">Cancel</button>
+                            <button type="submit" className="btn-gold flex-1 py-2.5 text-[10px] uppercase font-bold flex justify-center items-center gap-2"><Save size={14}/> Save Password</button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+
                     <button onClick={() => { logout(); navigate('/'); }} className="w-full flex items-center justify-center gap-2 py-3.5 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 transition-all text-xs font-sans tracking-wider uppercase mt-6 font-bold">
                       <LogOut size={14} /> Sign Out
                     </button>

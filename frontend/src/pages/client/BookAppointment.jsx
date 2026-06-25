@@ -16,8 +16,8 @@ const getLocalDateString = () => {
   return `${year}-${month}-${day}`;
 };
 
-const getDefaultSlots = (dateStr, intervalMinutes = 30) => {
-  let allSlots = generateTimeSlots(intervalMinutes).map(s => `${s}:00`);
+const getDefaultSlots = (dateStr, intervalMinutes = 30, openTime = '09:00', closeTime = '20:00') => {
+  let allSlots = generateTimeSlots(intervalMinutes, openTime, closeTime).map(s => `${s}:00`);
   const now = new Date();
   const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
   
@@ -44,15 +44,19 @@ export default function BookAppointment() {
   const [closedDays, setClosedDays] = useState([]);
   const [closedSlots, setClosedSlots] = useState([]);
   const [slotInterval, setSlotInterval] = useState(30);
+  const [openTime, setOpenTime] = useState('09:00');
+  const [closeTime, setCloseTime] = useState('20:00');
 
   useEffect(() => {
     settingsAPI.get()
       .then(res => {
         if (res.data?.data) {
           const rawData = res.data.data;
-          if (rawData.booking_slot_interval) {
-            setSlotInterval(parseInt(rawData.booking_slot_interval, 10) || 30);
+          if (rawData.slot_interval) {
+            setSlotInterval(parseInt(rawData.slot_interval, 10) || 30);
           }
+          if (rawData.open_time) setOpenTime(rawData.open_time);
+          if (rawData.close_time) setCloseTime(rawData.close_time);
           try {
             setClosedDays(JSON.parse(rawData.closed_days || '[]'));
           } catch(e) {
@@ -199,7 +203,7 @@ export default function BookAppointment() {
         setSlotToStaffMap({});
         return;
       }
-      setSlots(getDefaultSlots(newAppt.appointment_date, slotInterval));
+      setSlots(getDefaultSlots(newAppt.appointment_date, slotInterval, openTime, closeTime));
 
       appointmentsAPI.getSmartRecommendations({ date: newAppt.appointment_date, service_id: newAppt.service_id })
         .then(r => {
@@ -214,7 +218,7 @@ export default function BookAppointment() {
                 const ampm = h >= 12 ? 'pm' : 'am';
                 const hour12 = h % 12 || 12;
                 const displayTime = `${hour12}:${time24.split(':')[1]} ${ampm}`;
-                const isSlotClosed = (closedSlots[newAppt.appointment_date] || []).includes(displayTime);
+                const isSlotClosed = (closedSlots[newAppt.appointment_date] || []).some(s => s === slot || s === slot.substring(0, 5));
                 
                 if (!isSlotClosed && !allSlots.has(slot)) {
                   allSlots.add(slot);
@@ -242,7 +246,7 @@ export default function BookAppointment() {
         .catch(() => { setSlots([]); setSlotToStaffMap({}); });
     } else if (newAppt.appointment_date) {
       // Load standard slots by default if no service selected yet
-      setSlots(getDefaultSlots(newAppt.appointment_date, slotInterval));
+      setSlots(getDefaultSlots(newAppt.appointment_date, slotInterval, openTime, closeTime));
       setSlotToStaffMap({});
     } else {
       setSlots([]);
@@ -632,7 +636,7 @@ export default function BookAppointment() {
                   </p>
                 )}
 
-                {slots.length === 0 ? (
+                {slots.filter(s => !(closedSlots[newAppt.appointment_date] || []).some(cs => cs === s || cs === s.substring(0, 5))).length === 0 ? (
                   <p className="text-salon-muted text-xs italic bg-salon-dark/50 p-4 rounded-md text-center border border-salon-border/50">
                     Our specialists are currently fully engaged for this date. Please discover availability on another date.
                   </p>
@@ -640,6 +644,7 @@ export default function BookAppointment() {
                   <div className="space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
                     {['Morning', 'Afternoon', 'Evening'].map(period => {
                       const periodSlots = slots.filter(slot => {
+                        if ((closedSlots[newAppt.appointment_date] || []).some(cs => cs === slot || cs === slot.substring(0, 5))) return false;
                         const h = parseInt(slot.substring(0, 2), 10);
                         if (period === 'Morning') return h < 12;
                         if (period === 'Afternoon') return h >= 12 && h < 17;
@@ -663,28 +668,24 @@ export default function BookAppointment() {
                               const hour12 = h % 12 || 12;
                               const displayTime = `${hour12}:${time24.split(':')[1]} ${ampm}`;
                               const isSelected = newAppt.appointment_time?.substring(0, 5) === time24;
-                              const isSlotClosed = (closedSlots[newAppt.appointment_date] || []).includes(displayTime);
                               
                               return (
                                 <div key={slot} className="relative group/slot">
                                   <button 
                                     type="button" 
-                                    disabled={isSlotClosed}
                                     onClick={() => {
                                       setNewAppt(p => ({ ...p, appointment_time: slot, staff_id: null }));
                                       setShowTimeSlots(false);
                                     }}
                                     className={`w-full group relative overflow-hidden py-2.5 px-1 rounded-md transition-all duration-300 ${
-                                      isSlotClosed
-                                        ? 'opacity-30 cursor-not-allowed bg-white/5 border border-white/5'
-                                        : isSelected 
-                                          ? 'bg-gradient-to-br from-gold-400 to-gold-600 text-salon-black shadow-[0_0_15px_rgba(201,168,76,0.4)] scale-105 z-10' 
-                                          : 'bg-salon-dark/80 border border-white/[0.05] text-salon-muted hover:border-gold-500/40 hover:bg-gold-500/5 hover:-translate-y-0.5'
+                                      isSelected 
+                                        ? 'bg-gradient-to-br from-gold-400 to-gold-600 text-salon-black shadow-[0_0_15px_rgba(201,168,76,0.4)] scale-105 z-10' 
+                                        : 'bg-salon-dark/80 border border-white/[0.05] text-salon-muted hover:border-gold-500/40 hover:bg-gold-500/5 hover:-translate-y-0.5'
                                     }`}
                                   >
                                     {isSelected && <div className="absolute inset-0 bg-white/20 blur-md rounded-full scale-150 animate-pulse" />}
                                     <div className="relative z-10 flex flex-col items-center justify-center">
-                                      <span className={`text-sm font-sans font-bold tracking-wider ${isSelected ? 'text-salon-black' : isSlotClosed ? 'text-salon-muted' : 'text-salon-white group-hover:text-gold-400'}`}>
+                                      <span className={`text-sm font-sans font-bold tracking-wider ${isSelected ? 'text-salon-black' : 'text-salon-white group-hover:text-gold-400'}`}>
                                         {displayTime}
                                       </span>
                                       <span className={`text-[9px] font-bold tracking-widest ${isSelected ? 'text-black/60' : 'text-salon-muted/60'}`}>
@@ -692,11 +693,6 @@ export default function BookAppointment() {
                                       </span>
                                     </div>
                                   </button>
-                                  {isSlotClosed && (
-                                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-salon-dark text-amber-500/90 text-[10px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover/slot:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg border border-amber-500/20">
-                                      Temporarily not available
-                                    </div>
-                                  )}
                                 </div>
                               );
                             })}

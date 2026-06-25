@@ -4,6 +4,29 @@ const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/database');
 const { google } = require('googleapis');
 const { sendEmail } = require('../utils/email');
+const { z } = require('zod');
+const sanitizeHtml = require('sanitize-html');
+
+const sanitizeStr = (str) => {
+  if (!str) return '';
+  return sanitizeHtml(str, {
+    allowedTags: [],
+    allowedAttributes: {}
+  }).replace(/[<>]/g, '').trim();
+};
+
+const registerSchema = z.object({
+  name: z.string().min(2).max(50).transform(sanitizeStr),
+  email: z.string().email().max(100).transform(sanitizeStr),
+  phone: z.string().min(10).max(15).transform(sanitizeStr).optional(),
+  password: z.string().min(8).max(100),
+  gender: z.string().max(20).transform(sanitizeStr).optional()
+});
+
+const loginSchema = z.object({
+  email: z.string().email().max(100).transform(sanitizeStr),
+  password: z.string().min(8).max(100)
+});
 
 const generateTokens = (user) => {
   const payload = { id: user.id, email: user.email, role: user.role };
@@ -15,10 +38,17 @@ const generateTokens = (user) => {
 // Customer Registration
 const register = async (req, res, next) => {
   try {
-    const { name, email, phone, password, gender } = req.body;
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      console.warn(`[VALIDATION_ERROR] register:`, parsed.error.issues);
+      return res.status(400).json({ success: false, message: 'Invalid input provided. Please check your data and try again.' });
+    }
+
+    let { name, email, phone, password, gender } = parsed.data;
+    email = email ? email.toLowerCase() : '';
 
     if (name && /[0-9]/.test(name)) {
-      return res.status(400).json({ success: false, message: 'Name must contain only letters and spaces.' });
+      return res.status(400).json({ success: false, message: 'Invalid input provided. Please check your data and try again.' });
     }
 
     const [existing] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
@@ -67,7 +97,14 @@ const register = async (req, res, next) => {
 // Login (Customer & Admin)
 const login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      console.warn(`[VALIDATION_ERROR] login:`, parsed.error.issues);
+      return res.status(400).json({ success: false, message: 'Invalid credentials provided. Please try again.' });
+    }
+
+    let { email, password } = parsed.data;
+    email = email ? email.toLowerCase() : '';
 
     const [users] = await pool.execute(
       'SELECT id, name, email, password, role, is_active FROM users WHERE email = ?',
@@ -127,7 +164,14 @@ const login = async (req, res, next) => {
 // Admin login (extra validation)
 const adminLogin = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      console.warn(`[VALIDATION_ERROR] adminLogin:`, parsed.error.issues);
+      return res.status(400).json({ success: false, message: 'Invalid credentials provided. Please try again.' });
+    }
+
+    let { email, password } = parsed.data;
+    email = email ? email.toLowerCase() : '';
 
     const [users] = await pool.execute(
       "SELECT id, name, email, password, role, is_active FROM users WHERE email = ? AND role IN ('admin', 'super_admin')",
@@ -197,7 +241,8 @@ const getMe = async (req, res, next) => {
 // Forgot password - send reset email
 const forgotPassword = async (req, res, next) => {
   try {
-    const { email } = req.body;
+    let { email } = req.body;
+    email = email ? email.toLowerCase().trim() : '';
     const [users] = await pool.execute('SELECT id, name FROM users WHERE email = ?', [email]);
 
     if (users.length === 0) {
@@ -253,7 +298,8 @@ const forgotPassword = async (req, res, next) => {
 // Reset password
 const resetPassword = async (req, res, next) => {
   try {
-    const { token, otp, email, password } = req.body;
+    let { token, otp, email, password } = req.body;
+    email = email ? email.toLowerCase().trim() : '';
 
     let resets = [];
     if (token) {
@@ -321,6 +367,23 @@ const changePassword = async (req, res, next) => {
     await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
 
     res.json({ success: true, message: 'Password changed successfully.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Set password for users (e.g. Google Sign-In) who don't have or know their password
+const setPassword = async (req, res, next) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 12);
+    await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
+
+    res.json({ success: true, message: 'Password added successfully.' });
   } catch (error) {
     next(error);
   }
@@ -492,4 +555,4 @@ const googleLogin = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, adminLogin, adminMagicLogin, getMe, forgotPassword, resetPassword, refreshToken, changePassword, getAdminLogins, googleLogin };
+module.exports = { register, login, adminLogin, adminMagicLogin, getMe, forgotPassword, resetPassword, refreshToken, changePassword, setPassword, getAdminLogins, googleLogin };

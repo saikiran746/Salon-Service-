@@ -69,7 +69,7 @@ const membershipController = {
   },
   purchase: async (req, res, next) => {
     try {
-      const { plan_id, payment_method = 'online', customer_id } = req.body;
+      const { plan_id, payment_method = 'online', customer_id, skip_invoice } = req.body;
       const [plan] = await pool.execute('SELECT * FROM membership_plans WHERE id = ? AND is_active = 1', [plan_id]);
       if (!plan.length) return res.status(404).json({ success: false, message: 'Plan not found.' });
 
@@ -95,29 +95,32 @@ const membershipController = {
         [uuidv4(), customerData.id, plan_id, plan[0].price, payment_method, expiry.toISOString().split('T')[0]]
       );
 
-      // Generate corresponding bill and bill item for this membership purchase
-      const billId = uuidv4();
-      const invoiceNumber = `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(Math.random() * 9000) + 1000}`;
-      const amount = parseFloat(plan[0].price || 0);
-      const description = `Membership Plan: ${plan[0].name}`;
+      if (!skip_invoice) {
+        // Generate corresponding bill and bill item for this membership purchase
+        const billId = uuidv4();
+        const invoiceNumber = `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(Math.random() * 9000) + 1000}`;
+        const amount = parseFloat(plan[0].price || 0);
+        const description = `Membership Plan: ${plan[0].name}`;
 
-      await pool.execute(
-        `INSERT INTO bills (id, invoice_number, customer_id, subtotal, discount_percent, discount_amount, tax_percent, tax_amount, total_amount, payment_method, status, created_at)
-         VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, 'paid', CURRENT_TIMESTAMP)`,
-        [billId, invoiceNumber, customerData.id, amount, amount, payment_method || 'online']
-      );
+        await pool.execute(
+          `INSERT INTO bills (id, invoice_number, customer_id, subtotal, discount_percent, discount_amount, tax_percent, tax_amount, total_amount, payment_method, status, created_at)
+           VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, ?, 'paid', CURRENT_TIMESTAMP)`,
+          [billId, invoiceNumber, customerData.id, amount, amount, payment_method || 'online']
+        );
 
-      await pool.execute(
-        `INSERT INTO bill_items (id, bill_id, description, quantity, unit_price, total_price)
-         VALUES (?, ?, ?, 1, ?, ?)`,
-        [uuidv4(), billId, description, amount, amount]
-      );
+        await pool.execute(
+          `INSERT INTO bill_items (id, bill_id, description, quantity, unit_price, total_price)
+           VALUES (?, ?, ?, 1, ?, ?)`,
+          [uuidv4(), billId, description, amount, amount]
+        );
 
-      // Update customer total spent and total visits
-      await pool.execute(
-        `UPDATE customers SET total_spent = total_spent + ?, total_visits = total_visits + 1, last_visit = NOW() WHERE id = ?`,
-        [amount, customerData.id]
-      );
+        // Update customer total spent and total visits
+        await pool.execute(
+          `UPDATE customers SET total_spent = total_spent + ?, total_visits = total_visits + 1, last_visit = NOW() WHERE id = ?`,
+          [amount, customerData.id]
+        );
+      }
+
 
       await pool.execute(
         'INSERT INTO notifications (id, user_id, title, message, type) VALUES (?, ?, ?, ?, ?)',
@@ -788,14 +791,16 @@ const reportsController = {
       }));
 
       // Revenue breakdown: New vs Old clients
-      const firstBillDateMap = {};
+      // Instead of relying on customer created_at (which can reset during DB migrations),
+      // we define "New Client Revenue" as the revenue from a customer's VERY FIRST bill.
+      // Subsequent bills are "Old Client Revenue".
+      const firstBillMap = {};
       billRows.forEach(row => {
         if (row.customer_id) {
           const rootId = getRoot(row.customer_id);
-          const billTime = new Date(row.created_at).getTime();
-          const billDateStr = new Date(row.created_at).toDateString();
-          if (!firstBillDateMap[rootId] || billTime < firstBillDateMap[rootId].time) {
-            firstBillDateMap[rootId] = { time: billTime, dateStr: billDateStr };
+          const createdTime = new Date(row.created_at).getTime();
+          if (!firstBillMap[rootId] || createdTime < firstBillMap[rootId].time) {
+            firstBillMap[rootId] = { time: createdTime, billId: row.id };
           }
         }
       });
@@ -815,9 +820,8 @@ const reportsController = {
         let isNewClientThisMonth = true; // Default to new for anonymous walk-ins
         if (row.customer_id) {
           const rootId = getRoot(row.customer_id);
-          const billDateStr = new Date(row.created_at).toDateString();
-          
-          if (firstBillDateMap[rootId] && firstBillDateMap[rootId].dateStr === billDateStr) {
+          // Only consider it "new client revenue" if this is the FIRST bill for the customer
+          if (firstBillMap[rootId] && firstBillMap[rootId].billId === row.id) {
             isNewClientThisMonth = true;
           } else {
             isNewClientThisMonth = false;
@@ -883,7 +887,7 @@ const reportsController = {
         success: true, data: {
           revenue: { 
             total: lifetimeTotalRevenue, 
-            monthly: parseFloat(monthRevenueVal || 0) + monthMembershipRevenueVal, 
+            monthly: newClientRevenueThisMonth + oldClientRevenueThisMonth,
             monthlyServices: parseFloat(monthRevenueVal || 0),
             monthlyMemberships: monthMembershipRevenueVal,
             daily: parseFloat(dayRevenue?.total || 0),
@@ -1726,7 +1730,8 @@ const analyticsController = {
       const breakdownQ = `
         SELECT
           COALESCE(SUM(CASE WHEN LOWER(bi.description) LIKE '%membership%' THEN bi.total_price ELSE 0 END), 0) AS memberships,
-          COALESCE(SUM(CASE WHEN LOWER(bi.description) NOT LIKE '%membership%' THEN bi.total_price ELSE 0 END), 0) AS services
+          COALESCE(SUM(CASE WHEN LOWER(bi.description) NOT LIKE '%membership%' THEN bi.total_price ELSE 0 END), 0) AS services,
+          COALESCE(SUM(bi.total_price - bi.final_amount), 0) AS service_discounts
         FROM bills b JOIN bill_items bi ON b.id = bi.bill_id WHERE b.status = 'paid'`;
 
       const [[s1], [s2], [allBillsRows], [s4]] = await Promise.all([
@@ -1820,7 +1825,7 @@ const analyticsController = {
           avgBillValue: Math.round(parseFloat(stats.avg_bill || 0)),
           highestBill: Math.round(parseFloat(stats.max_bill || 0)),
           gstCollected: Math.round(parseFloat(stats.gst_collected || 0)),
-          discountGiven: Math.round(parseFloat(stats.discount_given || 0)),
+          discountGiven: Math.round(parseFloat(stats.discount_given || 0) + parseFloat(breakdown.service_discounts || 0)),
           netRevenue: Math.round(parseFloat(stats.net_revenue || 0)),
           avgBillTrend,
           paymentMethods: paymentData,

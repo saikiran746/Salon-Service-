@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { Menu, Bell, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import AdminSidebar from './Sidebar';
@@ -13,9 +14,35 @@ export default function AdminLayout({ children, title }) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  const prevNotifsRef = useRef([]);
+
   useEffect(() => {
     const fetchNotifs = () => {
-      notificationsAPI.getAll().then(res => setNotifs(res.data.data || [])).catch(() => {});
+      notificationsAPI.getAll().then(res => {
+        const newNotifs = res.data.data || [];
+        
+        // Diff for new notifications
+        if (prevNotifsRef.current.length > 0) {
+          const prevIds = new Set(prevNotifsRef.current.map(n => n.id));
+          const freshNotifs = newNotifs.filter(n => !prevIds.has(n.id) && !n.is_read);
+          
+          freshNotifs.forEach(notif => {
+            if (notif.title === 'New Appointment Request') {
+              toast((t) => (
+                <div className="flex flex-col gap-1 cursor-pointer" onClick={() => { toast.dismiss(t.id); setNotifOpen(true); }}>
+                  <span className="font-semibold text-sm">New Appointment Request</span>
+                  <span className="text-xs opacity-80 line-clamp-2">{notif.message.replace(/\|/g, ' ')}</span>
+                </div>
+              ), { duration: 6000, icon: '📅' });
+            } else {
+              toast(notif.title, { icon: '🔔' });
+            }
+          });
+        }
+
+        prevNotifsRef.current = newNotifs;
+        setNotifs(newNotifs);
+      }).catch(() => {});
     };
     fetchNotifs();
     const interval = setInterval(fetchNotifs, 10000); // Poll every 10 seconds

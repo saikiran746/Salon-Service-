@@ -94,7 +94,18 @@ export default function ServiceAnalytics() {
 
       {/* Service Performance Table */}
       <div className="admin-card mb-4">
-        <h3 className="card-title mb-5">All Services Performance</h3>
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="card-title">All Services Performance</h3>
+          <div className="bg-[#0A0A0A] border border-white/5 rounded-lg px-4 py-2 flex items-center gap-3 shadow-inner">
+            <Users size={16} className="text-gold-500" />
+            <div>
+              <p className="text-[9px] text-white/40 font-sans uppercase tracking-widest leading-tight">Total Clients</p>
+              <p className="text-white font-display text-lg leading-tight">
+                {services.reduce((acc, s) => acc + (s.bookings || 0), 0) + totalWalkIns}
+              </p>
+            </div>
+          </div>
+        </div>
         {services.length === 0 ? (
           <p className="text-white/30 text-[12px] font-sans text-center py-8">No service data available for the last 30 days.</p>
         ) : (

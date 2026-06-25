@@ -1,28 +1,17 @@
-const mysql = require('mysql2/promise');
 const { Pool: PgPool } = require('pg');
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
 let activePool = null;
-let activeDriver = null; // 'postgres', 'mysql', 'sqlite'
 
-// Stable database proxy matching mysql2/pg pool signatures
 const pool = {
   execute: async (query, params = []) => {
-    if (!activePool) {
-      throw new Error("Database connection pool is not initialized yet.");
-    }
+    if (!activePool) throw new Error('Database connection pool is not initialized yet.');
     return activePool.execute(query, params);
   },
   query: async (query, params = []) => {
-    if (!activePool) {
-      throw new Error("Database connection pool is not initialized yet.");
-    }
-    // If activePool has a query method, use it; otherwise fallback to execute
+    if (!activePool) throw new Error('Database connection pool is not initialized yet.');
     return activePool.query ? activePool.query(query, params) : activePool.execute(query, params);
   }
 };
@@ -33,586 +22,382 @@ function convertPlaceholders(query) {
 }
 
 async function testConnection() {
-  // 1. Try PostgreSQL (Neon Cloud) if DATABASE_URL is configured
-  if (process.env.DATABASE_URL) {
-    try {
-      console.log('🔌 Testing connection to PostgreSQL Cloud Database...');
-      const pgPoolTemp = new PgPool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000, // Increased timeout to wait for Neon wakeup
-      });
-      const client = await pgPoolTemp.connect();
-      client.release();
-      await pgPoolTemp.end();
-
-      // Configure PostgreSQL as the active driver
-      activeDriver = 'postgres';
-      const pgPool = new PgPool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false },
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
-      });
-
-      pgPool.on('error', (err) => {
-        console.warn('⚠️ Unexpected error on idle PostgreSQL client:', err.message);
-      });
-
-      pgPool.execute = async (query, params = []) => {
-        const formatted = convertPlaceholders(query);
-        const result = await pgPool.query(formatted, params);
-        return [result.rows, result];
-      };
-
-      activePool = pgPool;
-      console.log('✅ PostgreSQL connected successfully');
-
-      // ── Auto-migrate: create any missing tables in the PostgreSQL schema ──
-      try {
-        await pgPool.query(`
-          CREATE TABLE IF NOT EXISTS staff_shifts (
-            id TEXT PRIMARY KEY,
-            staff_id TEXT NOT NULL,
-            date TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            break_start TEXT,
-            break_duration INTEGER DEFAULT 0,
-            is_off INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS staff_leaves (
-            id TEXT PRIMARY KEY,
-            staff_id TEXT NOT NULL,
-            type TEXT NOT NULL,
-            start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL,
-            reason TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS staff_attendance (
-            id TEXT PRIMARY KEY,
-            staff_id TEXT NOT NULL,
-            date TEXT NOT NULL,
-            check_in TEXT,
-            check_out TEXT,
-            total_hours REAL DEFAULT 0.00,
-            status TEXT DEFAULT 'present',
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS admin_logins (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL,
-            ip_address TEXT,
-            device_type TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS cleared_notifications (
-            id TEXT PRIMARY KEY,
-            user_id TEXT,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            type TEXT DEFAULT 'info',
-            is_read INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS whatsapp_campaigns (
-            id VARCHAR(255) PRIMARY KEY,
-            campaign_name VARCHAR(255) NOT NULL,
-            message TEXT NOT NULL,
-            recipient_count INTEGER NOT NULL,
-            sent_count INTEGER NOT NULL,
-            failed_count INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-          );
-          CREATE TABLE IF NOT EXISTS campaign_histories (
-            id VARCHAR(255) PRIMARY KEY,
-            campaign_name VARCHAR(255) NOT NULL,
-            message TEXT NOT NULL,
-            total_recipients INTEGER NOT NULL,
-            sent_count INTEGER NOT NULL,
-            failed_count INTEGER NOT NULL,
-            status VARCHAR(50) DEFAULT 'PENDING',
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            completed_at TIMESTAMP NULL,
-            created_by VARCHAR(255)
-          );
-          CREATE TABLE IF NOT EXISTS campaign_recipients (
-            id VARCHAR(255) PRIMARY KEY,
-            campaign_id VARCHAR(255) NOT NULL,
-            customer_id VARCHAR(255),
-            phone VARCHAR(50) NOT NULL,
-            status VARCHAR(50) DEFAULT 'PENDING',
-            error_message TEXT,
-            sent_at TIMESTAMP NULL
-          );
-        `);
-        await pgPool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_cleared BOOLEAN DEFAULT FALSE;').catch(() => {});
-        await pgPool.query('ALTER TABLE appointments ALTER COLUMN staff_id DROP NOT NULL;').catch(() => {});
-        await pgPool.query('ALTER TABLE appointments ADD COLUMN IF NOT EXISTS service_ids TEXT;').catch(() => {});
-        await pgPool.query('ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS discount_percentage NUMERIC DEFAULT 0;').catch(() => {});
-        await pgPool.query('ALTER TABLE bill_items ADD COLUMN IF NOT EXISTS final_amount NUMERIC;').catch(() => {});
-        await pgPool.query('UPDATE bill_items SET final_amount = total_price WHERE final_amount IS NULL;').catch(() => {});
-        await pgPool.query('CREATE UNIQUE INDEX idx_unique_appt ON appointments (customer_id, appointment_date, appointment_time, service_id);').catch(() => {});
-        console.log('✅ PostgreSQL schedule tables ensured (staff_shifts, staff_leaves, staff_attendance, admin_logins, cleared_notifications)');
-      } catch (migErr) {
-        console.warn('⚠️ Migration warning:', migErr.message);
-      }
-
-      return;
-
-    } catch (error) {
-      console.warn('⚠️ PostgreSQL Cloud DB failed:', error.message);
-      console.log('🔌 Attempting local MySQL database fallback...');
-    }
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is not configured in .env');
   }
 
-  // 2. Try MySQL (Local Service) if configured
-  const mysqlConfig = {
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 3306,
-    database: process.env.DB_NAME || 'salon_db',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
+  console.log('🔌 Connecting to PostgreSQL Database...');
+  const pgPool = new PgPool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
+  pgPool.on('error', (err) => {
+    console.warn('⚠️ Unexpected error on idle PostgreSQL client:', err.message);
+  });
+
+  pgPool.execute = async (query, params = []) => {
+    const formatted = convertPlaceholders(query);
+    const result = await pgPool.query(formatted, params);
+    return [result.rows, result];
   };
+
+  activePool = pgPool;
+  console.log('✅ PostgreSQL connected successfully');
 
   try {
-    console.log('🔌 Testing connection to local MySQL service...');
-    const conn = await mysql.createConnection({
-      ...mysqlConfig,
-      connectTimeout: 3000,
-    });
-    await conn.end();
-
-    // Configure MySQL as the active driver
-    activeDriver = 'mysql';
-    activePool = mysql.createPool({
-      ...mysqlConfig,
-      waitForConnections: true,
-      connectionLimit: 20,
-      queueLimit: 0,
-      timezone: '+00:00',
-    });
-
-    console.log('✅ MySQL connected successfully');
-    await activePool.execute('ALTER TABLE appointments ADD COLUMN service_ids TEXT').catch(() => {});
-    await activePool.execute('ALTER TABLE appointments MODIFY staff_id VARCHAR(36) NULL').catch(() => {});
-    await activePool.execute('CREATE UNIQUE INDEX idx_unique_appt ON appointments (customer_id, appointment_date, appointment_time, service_id)').catch(() => {});
-    return;
-  } catch (error) {
-    console.warn('⚠️ Local MySQL service failed:', error.message);
-    console.log('🔌 Falling back to local, zero-dependency SQLite database...');
+    await initializePostgresSchema(pool);
+  } catch (migErr) {
+    console.warn('⚠️ Migration warning:', migErr.message);
   }
-
-  // 3. Graceful Fallback: Local SQLite File Database (Offline-Proof!)
-  activeDriver = 'sqlite';
-  const dbPath = path.resolve(__dirname, '../../database.sqlite');
-  console.log(`🔌 Initializing offline local SQLite database at: ${dbPath}`);
-
-  const sqliteDb = new sqlite3.Database(dbPath);
-
-  // Wrapper mimicking the mysql2/promise `pool` API signature
-  const sqlitePool = {
-    execute: (query, params = []) => {
-      return new Promise((resolve, reject) => {
-        const cleanedQuery = query.trim();
-        const isSelect = cleanedQuery.toUpperCase().startsWith('SELECT');
-        
-        // SQLite doesn't natively support "NOW()" or "CURRENT_TIMESTAMP ON UPDATE"
-        // We replace "NOW()" with "datetime('now')" in standard SQLite queries
-        let formattedQuery = cleanedQuery.replace(/\bNOW\(\)/gi, "datetime('now')");
-        
-        // Handle MySQL CURDATE() -> SQLite date('now')
-        formattedQuery = formattedQuery.replace(/\bCURDATE\(\)/gi, "date('now')");
-        
-        // Handle MySQL DATE_SUB(CURDATE(), INTERVAL x DAY) -> SQLite date('now', '-x days')
-        formattedQuery = formattedQuery.replace(/DATE_SUB\(CURDATE\(\),\s*INTERVAL\s+(\d+|\?)\s+DAY\)/gi, "date('now', '-$1 days')");
-        formattedQuery = formattedQuery.replace(/DATE_SUB\(CURDATE\(\),\s*INTERVAL\s+(\d+|\?)\s+MONTH\)/gi, "date('now', '-$1 months')");
-        
-        // Handle MySQL DATE_ADD(CURDATE(), INTERVAL x DAY) -> SQLite date('now', '+$1 days')
-        formattedQuery = formattedQuery.replace(/DATE_ADD\(CURDATE\(\),\s*INTERVAL\s+(\d+|\?)\s+DAY\)/gi, "date('now', '+$1 days')");
-        
-        if (isSelect) {
-          sqliteDb.all(formattedQuery, params, (err, rows) => {
-            if (err) {
-              console.error('SQLite SELECT Error:', err.message, '\nQuery:', formattedQuery);
-              reject(err);
-            } else {
-              resolve([rows, { rows }]);
-            }
-          });
-        } else {
-          sqliteDb.run(formattedQuery, params, function(err) {
-            if (err) {
-              console.error('SQLite WRITE Error:', err.message, '\nQuery:', formattedQuery);
-              reject(err);
-            } else {
-              resolve([[], { lastID: this.lastID, changes: this.changes }]);
-            }
-          });
-        }
-      });
-    },
-    query: (query, params = []) => sqlitePool.execute(query, params)
-  };
-
-  activePool = sqlitePool;
-
-  // Run SQLite table initializer and seed
-  await initializeSqliteSchema(sqliteDb);
-  console.log('✅ SQLite database initialized and seeded successfully!');
 }
 
-async function initializeSqliteSchema(db) {
-  const runQuery = (q) => {
-    return new Promise((resolve, reject) => {
-      db.run(q, (err) => {
-        if (err) reject(err);
-        else resolve();
-      });
+async function initializePostgresSchema(pool) {
+  const runQuery = async (q) => {
+    return pool.execute(q).catch(err => {
+      throw err;
     });
   };
 
   try {
-    // 17 Tables in SQLite friendly syntax
     await runQuery(`CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      phone TEXT,
-      password TEXT NOT NULL,
-      role TEXT DEFAULT 'customer',
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      phone VARCHAR(50),
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(50) DEFAULT 'customer',
       is_active INTEGER DEFAULT 1,
-      last_login TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      last_login TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS customers (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      name TEXT NOT NULL,
-      email TEXT,
-      phone TEXT,
-      date_of_birth TEXT,
-      gender TEXT,
+      id VARCHAR(255) PRIMARY KEY,
+      user_id VARCHAR(255),
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255),
+      phone VARCHAR(50),
+      date_of_birth DATE,
+      gender VARCHAR(20),
       address TEXT,
       notes TEXT,
-      source TEXT DEFAULT 'online',
-      membership_id TEXT,
-      membership_expiry TEXT,
+      source VARCHAR(50) DEFAULT 'online',
+      membership_id VARCHAR(255),
+      membership_expiry DATE,
       total_visits INTEGER DEFAULT 0,
-      total_spent REAL DEFAULT 0.00,
-      last_visit TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      total_spent DECIMAL(10, 2) DEFAULT 0.00,
+      last_visit TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS password_resets (
-      user_id TEXT PRIMARY KEY,
-      token TEXT UNIQUE NOT NULL,
-      otp TEXT,
-      expires_at TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      user_id VARCHAR(255) PRIMARY KEY,
+      token VARCHAR(255) UNIQUE NOT NULL,
+      otp VARCHAR(10),
+      expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS services (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
       description TEXT,
       duration INTEGER NOT NULL,
-      price REAL NOT NULL,
-      specialist_type TEXT,
-      category TEXT DEFAULT 'general',
-      image TEXT,
-      image_public_id TEXT,
+      price DECIMAL(10, 2) NOT NULL,
+      specialist_type VARCHAR(255),
+      category VARCHAR(255) DEFAULT 'general',
+      image VARCHAR(255),
+      image_public_id VARCHAR(255),
       sort_order INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS staff (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE,
-      phone TEXT,
-      gender TEXT,
-      experience TEXT,
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE,
+      phone VARCHAR(50),
+      gender VARCHAR(20),
+      experience VARCHAR(255),
       specializations TEXT,
       bio TEXT,
-      photo TEXT,
-      photo_public_id TEXT,
-      rating REAL DEFAULT 0.00,
+      photo VARCHAR(255),
+      photo_public_id VARCHAR(255),
+      rating DECIMAL(3, 2) DEFAULT 0.00,
       review_count INTEGER DEFAULT 0,
       total_clients INTEGER DEFAULT 0,
-      total_revenue REAL DEFAULT 0.00,
+      total_revenue DECIMAL(10, 2) DEFAULT 0.00,
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS membership_plans (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
       description TEXT,
-      price REAL NOT NULL,
+      price DECIMAL(10, 2) NOT NULL,
       validity_days INTEGER NOT NULL DEFAULT 365,
-      discount REAL DEFAULT 0.00,
+      discount DECIMAL(5, 2) DEFAULT 0.00,
       benefits TEXT,
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS membership_purchases (
-      id TEXT PRIMARY KEY,
-      customer_id TEXT NOT NULL,
-      plan_id TEXT NOT NULL,
-      amount REAL NOT NULL,
-      payment_method TEXT DEFAULT 'online',
-      purchased_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      expires_at TEXT NOT NULL
+      id VARCHAR(255) PRIMARY KEY,
+      customer_id VARCHAR(255) NOT NULL,
+      plan_id VARCHAR(255) NOT NULL,
+      amount DECIMAL(10, 2) NOT NULL,
+      payment_method VARCHAR(50) DEFAULT 'online',
+      purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATE NOT NULL
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS appointments (
-      id TEXT PRIMARY KEY,
-      customer_id TEXT,
-      service_id TEXT NOT NULL,
-      staff_id TEXT,
-      appointment_date TEXT NOT NULL,
-      appointment_time TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      customer_id VARCHAR(255),
+      service_id VARCHAR(255) NOT NULL,
+      staff_id VARCHAR(255),
+      appointment_date DATE NOT NULL,
+      appointment_time TIME NOT NULL,
       duration INTEGER,
-      price REAL,
+      price DECIMAL(10, 2),
       notes TEXT,
-      status TEXT DEFAULT 'confirmed',
-      source TEXT DEFAULT 'online',
-      bill_id TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      status VARCHAR(50) DEFAULT 'confirmed',
+      source VARCHAR(50) DEFAULT 'online',
+      bill_id VARCHAR(255),
+      service_ids TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS bills (
-      id TEXT PRIMARY KEY,
-      invoice_number TEXT UNIQUE NOT NULL,
-      appointment_id TEXT,
-      customer_id TEXT,
-      subtotal REAL NOT NULL,
-      discount_percent REAL DEFAULT 0,
-      discount_amount REAL DEFAULT 0,
-      tax_percent REAL DEFAULT 18.00,
-      tax_amount REAL DEFAULT 0,
-      total_amount REAL NOT NULL,
-      payment_method TEXT DEFAULT 'cash',
-      status TEXT DEFAULT 'paid',
-      pdf_path TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      id VARCHAR(255) PRIMARY KEY,
+      invoice_number VARCHAR(255) UNIQUE NOT NULL,
+      appointment_id VARCHAR(255),
+      customer_id VARCHAR(255),
+      subtotal DECIMAL(10, 2) NOT NULL,
+      discount_percent DECIMAL(5, 2) DEFAULT 0,
+      discount_amount DECIMAL(10, 2) DEFAULT 0,
+      tax_percent DECIMAL(5, 2) DEFAULT 18.00,
+      tax_amount DECIMAL(10, 2) DEFAULT 0,
+      total_amount DECIMAL(10, 2) NOT NULL,
+      payment_method VARCHAR(50) DEFAULT 'cash',
+      status VARCHAR(50) DEFAULT 'paid',
+      pdf_path VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS bill_items (
-      id TEXT PRIMARY KEY,
-      bill_id TEXT NOT NULL,
-      description TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      bill_id VARCHAR(255) NOT NULL,
+      description VARCHAR(255) NOT NULL,
       quantity INTEGER DEFAULT 1,
-      unit_price REAL NOT NULL,
-      total_price REAL NOT NULL
+      unit_price DECIMAL(10, 2) NOT NULL,
+      total_price DECIMAL(10, 2) NOT NULL,
+      discount_percentage DECIMAL(5, 2) DEFAULT 0,
+      final_amount DECIMAL(10, 2)
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS reviews (
-      id TEXT PRIMARY KEY,
-      staff_id TEXT NOT NULL,
-      customer_id TEXT NOT NULL,
-      appointment_id TEXT UNIQUE NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      staff_id VARCHAR(255) NOT NULL,
+      customer_id VARCHAR(255) NOT NULL,
+      appointment_id VARCHAR(255) UNIQUE NOT NULL,
       rating INTEGER NOT NULL,
       comment TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS gallery_posts (
-      id TEXT PRIMARY KEY,
-      title TEXT,
+      id VARCHAR(255) PRIMARY KEY,
+      title VARCHAR(255),
       caption TEXT,
-      media_url TEXT NOT NULL,
-      media_public_id TEXT,
-      media_type TEXT DEFAULT 'image',
+      media_url VARCHAR(255) NOT NULL,
+      media_public_id VARCHAR(255),
+      media_type VARCHAR(50) DEFAULT 'image',
       tags TEXT,
-      category TEXT DEFAULT 'All',
+      category VARCHAR(255) DEFAULT 'All',
       is_before_after INTEGER DEFAULT 0,
       is_published INTEGER DEFAULT 1,
       likes_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
-    await runQuery('ALTER TABLE gallery_posts ADD COLUMN category TEXT DEFAULT \'All\'').catch(() => {});
 
     await runQuery(`CREATE TABLE IF NOT EXISTS leads (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE,
-      phone TEXT,
-      source TEXT DEFAULT 'website',
-      page_visited TEXT,
-      status TEXT DEFAULT 'new',
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) UNIQUE,
+      phone VARCHAR(50),
+      source VARCHAR(50) DEFAULT 'website',
+      page_visited VARCHAR(255),
+      status VARCHAR(50) DEFAULT 'new',
       notes TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS email_templates (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      subject TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      subject VARCHAR(255) NOT NULL,
       body TEXT NOT NULL,
       trigger_days INTEGER,
       is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS email_campaigns (
-      id TEXT PRIMARY KEY,
-      template_id TEXT,
-      subject TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      template_id VARCHAR(255),
+      subject VARCHAR(255) NOT NULL,
       body TEXT NOT NULL,
       recipients_count INTEGER DEFAULT 0,
       sent_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS email_logs (
-      id TEXT PRIMARY KEY,
-      campaign_id TEXT,
-      customer_id TEXT NOT NULL,
-      email TEXT NOT NULL,
-      status TEXT DEFAULT 'delivered',
+      id VARCHAR(255) PRIMARY KEY,
+      campaign_id VARCHAR(255),
+      customer_id VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      status VARCHAR(50) DEFAULT 'delivered',
       error_message TEXT,
-      sent_at TEXT DEFAULT CURRENT_TIMESTAMP
+      sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS notifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      title TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      user_id VARCHAR(255),
+      title VARCHAR(255) NOT NULL,
       message TEXT NOT NULL,
-      type TEXT DEFAULT 'info',
+      type VARCHAR(50) DEFAULT 'info',
       is_read INTEGER DEFAULT 0,
       is_cleared INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
-    await runQuery('ALTER TABLE notifications ADD COLUMN is_cleared INTEGER DEFAULT 0').catch(() => {});
-    await runQuery('ALTER TABLE appointments ADD COLUMN service_ids TEXT').catch(() => {});
-    await runQuery('ALTER TABLE bill_items ADD COLUMN discount_percentage REAL DEFAULT 0').catch(() => {});
-    await runQuery('ALTER TABLE bill_items ADD COLUMN final_amount REAL').catch(() => {});
-    await runQuery('UPDATE bill_items SET final_amount = total_price WHERE final_amount IS NULL').catch(() => {});
+
     await runQuery(`CREATE TABLE IF NOT EXISTS cleared_notifications (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      title TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      user_id VARCHAR(255),
+      title VARCHAR(255) NOT NULL,
       message TEXT NOT NULL,
-      type TEXT DEFAULT 'info',
+      type VARCHAR(50) DEFAULT 'info',
       is_read INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS staff_shifts (
-      id TEXT PRIMARY KEY,
-      staff_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      start_time TEXT NOT NULL,
-      end_time TEXT NOT NULL,
-      break_start TEXT,
+      id VARCHAR(255) PRIMARY KEY,
+      staff_id VARCHAR(255) NOT NULL,
+      date VARCHAR(255) NOT NULL,
+      start_time VARCHAR(255) NOT NULL,
+      end_time VARCHAR(255) NOT NULL,
+      break_start VARCHAR(255),
       break_duration INTEGER DEFAULT 60,
       is_off INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS staff_leaves (
-      id TEXT PRIMARY KEY,
-      staff_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      staff_id VARCHAR(255) NOT NULL,
+      type VARCHAR(255) NOT NULL,
+      start_date VARCHAR(255) NOT NULL,
+      end_date VARCHAR(255) NOT NULL,
       reason TEXT,
-      status TEXT DEFAULT 'pending',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      status VARCHAR(50) DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS staff_attendance (
-      id TEXT PRIMARY KEY,
-      staff_id TEXT NOT NULL,
-      date TEXT NOT NULL,
-      check_in TEXT,
-      check_out TEXT,
-      total_hours REAL DEFAULT 0.00,
-      status TEXT DEFAULT 'present',
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      id VARCHAR(255) PRIMARY KEY,
+      staff_id VARCHAR(255) NOT NULL,
+      date VARCHAR(255) NOT NULL,
+      check_in VARCHAR(255),
+      check_out VARCHAR(255),
+      total_hours DECIMAL(5, 2) DEFAULT 0.00,
+      status VARCHAR(50) DEFAULT 'present',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS admin_logins (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      role TEXT NOT NULL,
-      ip_address TEXT,
-      device_type TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      id VARCHAR(255) PRIMARY KEY,
+      user_id VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      role VARCHAR(50) NOT NULL,
+      ip_address VARCHAR(255),
+      device_type VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS site_settings (
-      id TEXT PRIMARY KEY,
-      site_name TEXT,
-      email TEXT,
-      phone TEXT,
+      id VARCHAR(255) PRIMARY KEY,
+      site_name VARCHAR(255),
+      email VARCHAR(255),
+      phone VARCHAR(255),
       address TEXT,
       maps_link TEXT,
-      whatsapp TEXT,
-      instagram TEXT,
-      facebook TEXT,
-      twitter TEXT,
+      whatsapp VARCHAR(50),
+      instagram VARCHAR(255),
+      facebook VARCHAR(255),
+      twitter VARCHAR(255),
       working_hours TEXT,
       closed_days TEXT,
       closed_slots TEXT,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS whatsapp_campaigns (
-      id TEXT PRIMARY KEY,
-      campaign_name TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      campaign_name VARCHAR(255) NOT NULL,
       message TEXT NOT NULL,
       recipient_count INTEGER NOT NULL,
       sent_count INTEGER NOT NULL,
       failed_count INTEGER NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS campaign_histories (
-      id TEXT PRIMARY KEY,
-      campaign_name TEXT NOT NULL,
+      id VARCHAR(255) PRIMARY KEY,
+      campaign_name VARCHAR(255) NOT NULL,
       message TEXT NOT NULL,
       total_recipients INTEGER NOT NULL,
       sent_count INTEGER NOT NULL,
       failed_count INTEGER NOT NULL,
-      status TEXT DEFAULT 'PENDING',
-      started_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      completed_at TEXT,
-      created_by TEXT
+      status VARCHAR(50) DEFAULT 'PENDING',
+      started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP NULL,
+      created_by VARCHAR(255)
     )`);
 
     await runQuery(`CREATE TABLE IF NOT EXISTS campaign_recipients (
-      id TEXT PRIMARY KEY,
-      campaign_id TEXT NOT NULL,
-      customer_id TEXT,
-      phone TEXT NOT NULL,
-      status TEXT DEFAULT 'PENDING',
+      id VARCHAR(255) PRIMARY KEY,
+      campaign_id VARCHAR(255) NOT NULL,
+      customer_id VARCHAR(255),
+      phone VARCHAR(50) NOT NULL,
+      status VARCHAR(50) DEFAULT 'PENDING',
       error_message TEXT,
-      sent_at TEXT
+      sent_at TIMESTAMP NULL
     )`);
+
+    await runQuery('CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_appt ON appointments (customer_id, appointment_date, appointment_time, service_id)').catch(() => {});
+
+    console.log('✅ PostgreSQL schema created successfully');
 
     // ==================== AUTO-SEED DEFAULT DATA ====================
     
@@ -662,20 +447,7 @@ async function initializeSqliteSchema(db) {
       console.log('🌱 Seeded win-back email templates.');
     }
 
-    // 4. Seed TONI & GUY Essensuals services from real menu
-    const [servicesRow] = await pool.execute('SELECT * FROM services');
-    if (servicesRow.length === 0) {
-      const services = [];
-      for (const s of services) {
-        await pool.execute(
-          'INSERT INTO services (id, name, description, price, duration, category, image, specialist_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [s.id, s.name, s.description, s.price, s.duration, s.category, s.image, s.type]
-        );
-      }
-      console.log('🌱 Seeded luxury services catalog.');
-    }
-
-    // 5. Seed master stylists / specialists
+    // 4. Seed master stylists / specialists
     const [staffRow] = await pool.execute('SELECT * FROM staff');
     if (staffRow.length === 0) {
       const staff = [
@@ -693,7 +465,7 @@ async function initializeSqliteSchema(db) {
       console.log('🌱 Seeded specialists roster.');
     }
 
-    // 6. Seed gallery lightbox posts
+    // 5. Seed gallery lightbox posts
     const [galleryRow] = await pool.execute('SELECT * FROM gallery_posts');
     if (galleryRow.length === 0) {
       const gallery = [
@@ -711,7 +483,7 @@ async function initializeSqliteSchema(db) {
       console.log('🌱 Seeded gallery photos.');
     }
 
-    // 7. Seed site settings
+    // 6. Seed site settings
     const [settingsRow] = await pool.execute('SELECT * FROM site_settings');
     if (settingsRow.length === 0) {
       await pool.execute(
@@ -736,17 +508,15 @@ async function initializeSqliteSchema(db) {
       console.log('🌱 Seeded site settings.');
     }
 
-    // Add unique constraint to prevent duplicate bookings across all dialects
-    await runQuery('CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_appt ON appointments (customer_id, appointment_date, appointment_time, service_id)').catch(() => {});
   } catch (error) {
-    console.error('❌ Failed to initialize SQLite database schema:', error.message);
+    console.error('❌ Failed to initialize PostgreSQL database schema:', error.message);
   }
 }
 
 module.exports = {
   pool,
   testConnection,
-  get usePostgres() { return activeDriver === 'postgres'; },
-  get useMysql() { return activeDriver === 'mysql'; },
-  get useSqlite() { return activeDriver === 'sqlite'; }
+  get usePostgres() { return true; },
+  get useMysql() { return false; },
+  get useSqlite() { return false; }
 };

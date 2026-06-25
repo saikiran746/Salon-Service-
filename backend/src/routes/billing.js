@@ -9,5 +9,6 @@ router.post('/', ...adminOnly, ctrl.createBill);
 router.get('/:id', authenticate, ctrl.getBillById);
 router.get('/:id/download', authenticate, ctrl.downloadInvoice);
 router.get('/:id/pdf', authenticate, ctrl.viewInvoice);
+router.delete('/:id', ...adminOnly, ctrl.deleteBill);
 
 module.exports = router;

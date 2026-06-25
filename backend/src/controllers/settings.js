@@ -23,7 +23,9 @@ const ensureSettingsColumns = async () => {
         { name: 'account_number', type: 'TEXT' },
         { name: 'closed_days', type: 'TEXT' },
         { name: 'closed_slots', type: 'TEXT' },
-        { name: 'slot_interval', type: 'INTEGER DEFAULT 30' },
+        { name: 'slot_interval', type: "INTEGER DEFAULT 30" },
+        { name: 'open_time', type: "TEXT DEFAULT '09:00'" },
+        { name: 'close_time', type: "TEXT DEFAULT '20:00'" },
         { name: 'secondary_alert_email', type: 'TEXT' },
       ];
       for (const col of cols) {
@@ -34,14 +36,14 @@ const ensureSettingsColumns = async () => {
       const cols = [
         'gstin TEXT', 'bank_name TEXT', 'ifsc_code TEXT', 'account_number TEXT',
         'closed_days TEXT', 'closed_slots TEXT',
-        'slot_interval INTEGER DEFAULT 30', 'secondary_alert_email TEXT'
+        'slot_interval INTEGER DEFAULT 30', "open_time TEXT DEFAULT '09:00'", "close_time TEXT DEFAULT '20:00'", 'secondary_alert_email TEXT'
       ];
       for (const col of cols) {
         await pool.execute(`ALTER TABLE site_settings ADD COLUMN ${col}`).catch(() => {});
       }
     }
     migrated = true;
-    console.log('✅ site_settings columns ensured (slot_interval, secondary_alert_email)');
+    console.log('✅ site_settings columns ensured (slot_interval, open_time, close_time, secondary_alert_email)');
   } catch (err) {
     console.warn('Migration warning for site_settings columns:', err.message);
     migrated = true; // Don't retry on failure
@@ -73,6 +75,8 @@ const getSettings = async (req, res, next) => {
           closed_days: '[]',
           closed_slots: '[]',
           slot_interval: 30,
+          open_time: '09:00',
+          close_time: '20:00',
           secondary_alert_email: '',
         }
       });
@@ -80,6 +84,8 @@ const getSettings = async (req, res, next) => {
     // Ensure slot_interval has a sensible default
     const row = settings[0];
     if (!row.slot_interval) row.slot_interval = 30;
+    if (!row.open_time) row.open_time = '09:00';
+    if (!row.close_time) row.close_time = '20:00';
     res.json({ success: true, data: row });
   } catch (error) {
     next(error);
@@ -94,7 +100,7 @@ const updateSettings = async (req, res, next) => {
       instagram, facebook, twitter, working_hours,
       gstin, bank_name, ifsc_code, account_number,
       closed_days, closed_slots,
-      slot_interval, secondary_alert_email
+      slot_interval, open_time, close_time, secondary_alert_email
     } = req.body;
 
     const slotIntervalVal = parseInt(slot_interval, 10) || 30;
@@ -105,12 +111,12 @@ const updateSettings = async (req, res, next) => {
     if (existing.length === 0) {
       invoiceInfoChanged = true;
       await pool.execute(
-        `INSERT INTO site_settings (id, site_name, email, phone, address, maps_link, whatsapp, instagram, facebook, twitter, working_hours, gstin, bank_name, ifsc_code, account_number, closed_days, closed_slots, slot_interval, secondary_alert_email)
-         VALUES ('settings-001', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO site_settings (id, site_name, email, phone, address, maps_link, whatsapp, instagram, facebook, twitter, working_hours, gstin, bank_name, ifsc_code, account_number, closed_days, closed_slots, slot_interval, open_time, close_time, secondary_alert_email)
+         VALUES ('settings-001', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [site_name, email, phone, address, maps_link, whatsapp, instagram, facebook, twitter, working_hours,
           gstin || '', bank_name || '', ifsc_code || '', account_number || '',
           closed_days || '[]', closed_slots || '[]',
-          slotIntervalVal, secondary_alert_email || '']
+          slotIntervalVal, open_time || '09:00', close_time || '20:00', secondary_alert_email || '']
       );
     } else {
       const old = existing[0];
@@ -129,13 +135,14 @@ const updateSettings = async (req, res, next) => {
          whatsapp = ?, instagram = ?, facebook = ?, twitter = ?, working_hours = ?,
          gstin = ?, bank_name = ?, ifsc_code = ?, account_number = ?,
          closed_days = ?, closed_slots = ?,
-         slot_interval = ?, secondary_alert_email = ?,
+         slot_interval = ?, open_time = ?, close_time = ?, secondary_alert_email = ?,
          updated_at = CURRENT_TIMESTAMP
          WHERE id = ?`,
         [site_name, email, phone, address, maps_link, whatsapp, instagram, facebook, twitter, working_hours,
           gstin || '', bank_name || '', ifsc_code || '', account_number || '',
           closed_days || '[]', closed_slots || '[]',
-          slotIntervalVal, secondary_alert_email || '', id]
+          slotIntervalVal, open_time || '09:00', close_time || '20:00',
+          secondary_alert_email !== undefined ? secondary_alert_email : old.secondary_alert_email, id]
       );
     }
 
@@ -165,11 +172,78 @@ const updateSettings = async (req, res, next) => {
   }
 };
 
+const requestCredChangeOtp = async (req, res, next) => {
+  try {
+    const { currentPassword, newEmail, newPassword } = req.body;
+    
+    if (!newEmail && !newPassword) {
+      return res.status(400).json({ success: false, message: 'Provide a new email or new password to update.' });
+    }
+
+    // First verify current password to even request OTP
+    const [users] = await pool.execute(
+      "SELECT id, email, password FROM users WHERE id = ? AND role IN ('admin', 'super_admin')",
+      [req.user.id]
+    );
+    if (users.length === 0) return res.status(404).json({ success: false, message: 'Admin user not found.' });
+    
+    const user = users[0];
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+
+    let hasChanges = false;
+    if (newEmail && newEmail !== user.email) hasChanges = true;
+    if (newPassword) hasChanges = true;
+
+    if (!hasChanges) {
+      return res.status(400).json({ success: false, message: 'No changes detected. New email is same as current.' });
+    }
+
+    if (newEmail && newEmail !== user.email) {
+      const [emailCheck] = await pool.execute('SELECT id FROM users WHERE email = ? AND id != ?', [newEmail, user.id]);
+      if (emailCheck.length > 0) {
+        return res.status(409).json({ success: false, message: 'That email address is already in use.' });
+      }
+    }
+
+    await ensureSettingsColumns();
+    const [settingsRow] = await pool.execute('SELECT secondary_alert_email FROM site_settings LIMIT 1');
+    const secondaryEmail = settingsRow[0]?.secondary_alert_email?.trim();
+
+    if (!secondaryEmail) {
+      return res.json({ success: true, otpRequired: false });
+    }
+
+    const otp = generateOtp();
+    otpCache.set(`cred_${secondaryEmail}`, { otp, expiresAt: Date.now() + 15 * 60 * 1000 });
+
+    const emailHtml = `
+      <h2 style="color:#C9A84C;">Admin Credentials Change Request</h2>
+      <p>An attempt was made to change the admin login credentials for your TONI & GUY salon system.</p>
+      <p>If you requested this change, please use the following OTP to authorize the update:</p>
+      <div style="background:#f9f5ef;border:2px dashed #C9A84C;padding:24px;text-align:center;font-size:36px;letter-spacing:12px;font-weight:bold;color:#0a0a0a;margin:32px 0;">
+        ${otp}
+      </div>
+      <p style="color:#999;font-size:12px;">This code expires in 15 minutes. If you did not request this, please ignore this email and your credentials will remain unchanged.</p>
+    `;
+
+    await sendEmail({
+      to: secondaryEmail,
+      subject: 'OTP to Authorize Admin Credentials Change',
+      html: emailHtml
+    });
+
+    res.json({ success: true, otpRequired: true, message: 'OTP sent to your secondary alert email.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Change admin credentials (email and/or password)
 // Sends: 1) admin panel notification, 2) optional security alert to secondary_alert_email
 const changeAdminCredentials = async (req, res, next) => {
   try {
-    const { currentPassword, newEmail, newPassword, confirmPassword } = req.body;
+    const { currentPassword, newEmail, newPassword, confirmPassword, otp } = req.body;
 
     // Must provide at least one change
     if (!newEmail && !newPassword) {
@@ -197,6 +271,28 @@ const changeAdminCredentials = async (req, res, next) => {
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) {
       return res.status(400).json({ success: false, message: 'Current password is incorrect.' });
+    }
+
+    await ensureSettingsColumns();
+    const [settingsRow] = await pool.execute('SELECT secondary_alert_email FROM site_settings LIMIT 1');
+    const secondaryEmail = settingsRow[0]?.secondary_alert_email?.trim();
+
+    // Verify OTP if secondary email is configured
+    if (secondaryEmail) {
+      if (!otp) {
+        return res.status(400).json({ success: false, message: 'OTP is required to change credentials.' });
+      }
+      const cachedData = otpCache.get(`cred_${secondaryEmail}`);
+      if (!cachedData) {
+        return res.status(400).json({ success: false, message: 'OTP expired or invalid.' });
+      }
+      if (Date.now() > cachedData.expiresAt) {
+        otpCache.delete(`cred_${secondaryEmail}`);
+        return res.status(400).json({ success: false, message: 'OTP has expired.' });
+      }
+      if (cachedData.otp !== otp.toString()) {
+        return res.status(400).json({ success: false, message: 'Invalid OTP.' });
+      }
     }
 
     // If changing email, check it's not already taken
@@ -230,6 +326,11 @@ const changeAdminCredentials = async (req, res, next) => {
 
     params.push(user.id);
     await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
+
+    // Clear OTP from cache if it was used
+    if (secondaryEmail) {
+      otpCache.delete(`cred_${secondaryEmail}`);
+    }
 
     const changedStr = changedFields.join(' & ');
     const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -378,4 +479,4 @@ const verifyEmailOtp = async (req, res, next) => {
   }
 };
 
-module.exports = { getSettings, updateSettings, changeAdminCredentials, requestEmailOtp, verifyEmailOtp };
+module.exports = { getSettings, updateSettings, changeAdminCredentials, requestEmailOtp, verifyEmailOtp, requestCredChangeOtp };

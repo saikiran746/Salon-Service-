@@ -12,5 +12,6 @@ router.put('/me', authenticate, ctrl.updateMyProfile);
 router.get('/', ...adminOnly, ctrl.getAllCustomers);
 router.get('/:id', ...adminOnly, ctrl.getCustomerById);
 router.put('/:id', ...adminOnly, ctrl.updateCustomer);
+router.delete('/:id', ...adminOnly, ctrl.deleteCustomer);
 
 module.exports = router;

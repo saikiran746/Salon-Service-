@@ -110,16 +110,20 @@ export default function AdminAppointments() {
   const [slotsActiveTab, setSlotsActiveTab] = useState('today');
   const [closedSlots, setClosedSlots] = useState({});
   const [slotInterval, setSlotInterval] = useState(30);
+  const [openTime, setOpenTime] = useState('09:00');
+  const [closeTime, setCloseTime] = useState('20:00');
 
-  const timeSlots = generateTimeSlots(slotInterval);
+  const timeSlots = generateTimeSlots(slotInterval, openTime, closeTime);
 
   const loadSettings = async () => {
     try {
       const res = await settingsAPI.get();
       if (res.data?.data) {
-        if (res.data.data.booking_slot_interval) {
-          setSlotInterval(parseInt(res.data.data.booking_slot_interval, 10));
+        if (res.data.data.slot_interval) {
+          setSlotInterval(parseInt(res.data.data.slot_interval, 10));
         }
+        if (res.data.data.open_time) setOpenTime(res.data.data.open_time);
+        if (res.data.data.close_time) setCloseTime(res.data.data.close_time);
         const raw = res.data.data.closed_slots;
         try {
           const parsed = raw ? JSON.parse(raw) : {};
@@ -171,6 +175,7 @@ export default function AdminAppointments() {
     if (s !== null) setFilters(p => ({ ...p, search: s }));
   }, [searchParams]);
   const [showCreate, setShowCreate] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [showTimeSlots, setShowTimeSlots] = useState(false);
   const [services, setServices] = useState([]);
   const [staff, setStaff] = useState([]);
@@ -406,6 +411,7 @@ export default function AdminAppointments() {
       toast.error('Please select at least one service.');
       return;
     }
+    setIsCreating(true);
     try {
       const payload = {
         ...newAppt,
@@ -474,7 +480,11 @@ export default function AdminAppointments() {
       setSelectedServices([]);
       setServiceSearch('');
       load();
-    } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
+    } catch (err) { 
+      toast.error(err.response?.data?.message || 'Failed.'); 
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
@@ -587,9 +597,19 @@ export default function AdminAppointments() {
                 const isOpen = !isClosed;
                 const hasBookings = item.status === 'booked' || item.status === 'partial';
 
+                // Check if slot is in the past for today
+                const now = new Date();
+                const currentTimeVal = now.getHours() * 60 + now.getMinutes();
+                const slotTimeVal = h * 60 + parseInt(item.slot.split(':')[1], 10);
+                const isPast = slotsActiveTab === 'today' && slotTimeVal < currentTimeVal;
+
                 let badgeClass = '';
                 let statusText = '';
-                if (isClosed) {
+                
+                if (isPast) {
+                  badgeClass = 'bg-white/5 border-white/5 text-white/20 opacity-30 pointer-events-none grayscale';
+                  statusText = 'PASSED';
+                } else if (isClosed) {
                   badgeClass = 'bg-red-500/5 border-red-500/20 text-red-400/40 opacity-70';
                   statusText = 'OFF';
                 } else if (item.status === 'no_staff') {
@@ -1040,6 +1060,10 @@ export default function AdminAppointments() {
                           return false;
                         }
                       }
+                      const dateToCheck = newAppt.appointment_date || formatDateString(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+                      if ((closedSlots[dateToCheck] || []).some(cs => cs === slot || cs === slot.substring(0, 5))) {
+                        return false;
+                      }
                       return true;
                     }).map(slot => {
                       const time24 = slot.substring(0, 5);
@@ -1048,33 +1072,23 @@ export default function AdminAppointments() {
                       const hour12 = h % 12 || 12;
                       const displayTime = `${hour12}:${time24.split(':')[1]} ${ampm}`;
                       const isSelected = newAppt.appointment_time?.substring(0, 5) === time24;
-                      const dateToCheck = newAppt.appointment_date || formatDateString(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-                      const isSlotClosed = (closedSlots[dateToCheck] || []).includes(displayTime);
 
                       return (
                         <div key={slot} className="relative group/slot">
                           <button 
                             type="button" 
-                            disabled={isSlotClosed}
                             onClick={() => {
                               setNewAppt(p => ({ ...p, appointment_time: slot }));
                               setShowTimeSlots(false);
                             }}
                             className={`w-full py-2 text-[10px] font-sans tracking-wider text-center transition-all border rounded-md ${
-                              isSlotClosed
-                                ? 'opacity-30 cursor-not-allowed border-salon-border/20 text-salon-muted bg-white/5'
-                                : isSelected 
-                                  ? 'bg-gold-500/20 text-gold-400 border-gold-500/50 shadow-inner' 
-                                  : 'border-white/10 text-salon-white hover:border-gold-500/40 hover:text-gold-400'
+                              isSelected 
+                                ? 'bg-gold-500/20 text-gold-400 border-gold-500/50 shadow-inner' 
+                                : 'border-white/10 text-salon-white hover:border-gold-500/40 hover:text-gold-400'
                             }`}
                           >
                             {displayTime}
                           </button>
-                          {isSlotClosed && (
-                            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-salon-dark text-amber-500/90 text-[9px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover/slot:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg border border-amber-500/20">
-                              Temporarily not available
-                            </div>
-                          )}
                         </div>
                       );
                     })}
@@ -1093,11 +1107,17 @@ export default function AdminAppointments() {
                 </button>
                 <button 
                   type="submit" 
-                  disabled={selectedServices.length === 0}
-                  className="relative overflow-hidden flex-1 py-3.5 text-[10px] tracking-widest uppercase font-sans font-bold bg-gradient-to-r from-gold-600 via-gold-400 to-gold-600 text-salon-black shadow-[0_4px_15px_rgba(201,168,76,0.3)] hover:shadow-[0_6px_20px_rgba(201,168,76,0.5)] transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 rounded-md group disabled:opacity-40 disabled:pointer-events-none"
+                  disabled={selectedServices.length === 0 || isCreating}
+                  className="relative overflow-hidden flex-1 py-3.5 text-[10px] tracking-widest uppercase font-sans font-bold bg-gradient-to-r from-gold-600 via-gold-400 to-gold-600 text-salon-black shadow-[0_4px_15px_rgba(201,168,76,0.3)] hover:shadow-[0_6px_20px_rgba(201,168,76,0.5)] transition-all duration-300 hover:-translate-y-0.5 active:translate-y-0 rounded-md group disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center"
                 >
-                  <div className="absolute inset-0 w-[200%] h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out pointer-events-none" />
-                  <span className="relative z-10">Create</span>
+                  {isCreating ? (
+                    <div className="w-4 h-4 border-2 border-salon-black/30 border-t-salon-black rounded-full animate-spin relative z-10"></div>
+                  ) : (
+                    <>
+                      <div className="absolute inset-0 w-[200%] h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out pointer-events-none" />
+                      <span className="relative z-10">Create</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

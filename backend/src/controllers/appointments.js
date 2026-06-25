@@ -112,9 +112,16 @@ const createAppointment = async (req, res, next) => {
       try {
         const [settings] = await pool.execute('SELECT closed_slots FROM site_settings LIMIT 1');
         if (settings.length > 0 && settings[0].closed_slots) {
-          const closedSlots = JSON.parse(settings[0].closed_slots || '[]');
-          const timeKey = appointment_time.substring(0, 5); // e.g. "13:00"
-          if (Array.isArray(closedSlots) && closedSlots.includes(timeKey)) {
+          let closedSlotsMap = {};
+          try {
+            closedSlotsMap = JSON.parse(settings[0].closed_slots || '{}');
+            if (Array.isArray(closedSlotsMap)) closedSlotsMap = {};
+          } catch(e) {}
+          const closedSlotsForDate = closedSlotsMap[appointment_date] || [];
+          const timeKey = appointment_time.substring(0, 8); // e.g. "13:00:00"
+          
+          // Also check partial string just in case
+          if (closedSlotsForDate.includes(timeKey) || closedSlotsForDate.includes(timeKey.substring(0,5))) {
             return res.status(400).json({ 
               success: false, 
               message: `The selected time slot is closed for bookings. Please choose another.` 
@@ -599,12 +606,17 @@ const getAvailableSlots = async (req, res, next) => {
 
     // Read slot_interval and closed_slots from site settings
     let slotInterval = 30;
-    let closedSlots = [];
+    let closedSlotsMap = {};
     try {
       const [settings] = await pool.execute('SELECT slot_interval, closed_slots FROM site_settings LIMIT 1');
       if (settings.length > 0) {
         if (settings[0].slot_interval) slotInterval = parseInt(settings[0].slot_interval, 10) || 30;
-        if (settings[0].closed_slots) closedSlots = JSON.parse(settings[0].closed_slots || '[]');
+        if (settings[0].closed_slots) {
+          try {
+            const parsed = JSON.parse(settings[0].closed_slots);
+            closedSlotsMap = Array.isArray(parsed) ? {} : parsed;
+          } catch(e) {}
+        }
       }
     } catch (err) {
       console.warn('Error fetching site settings for slots:', err.message);
@@ -613,8 +625,9 @@ const getAvailableSlots = async (req, res, next) => {
     const allSlots = buildDaySlots(slotInterval);
     let availableSlots = allSlots;
 
-    if (closedSlots.length > 0) {
-      availableSlots = availableSlots.filter(slot => !closedSlots.includes(slot.substring(0, 5)));
+    const closedForDate = closedSlotsMap[date] || [];
+    if (closedForDate.length > 0) {
+      availableSlots = availableSlots.filter(slot => !closedForDate.includes(slot) && !closedForDate.includes(slot.substring(0, 5)));
     }
 
     const [booked] = await pool.execute(
@@ -639,12 +652,17 @@ const getSmartRecommendations = async (req, res, next) => {
 
     // Read slot_interval and closed_slots from site settings
     let slotInterval = 30;
-    let closedSlots = [];
+    let closedSlotsMap = {};
     try {
       const [settings] = await pool.execute('SELECT slot_interval, closed_slots FROM site_settings LIMIT 1');
       if (settings.length > 0) {
         if (settings[0].slot_interval) slotInterval = parseInt(settings[0].slot_interval, 10) || 30;
-        if (settings[0].closed_slots) closedSlots = JSON.parse(settings[0].closed_slots || '[]');
+        if (settings[0].closed_slots) {
+          try {
+            const parsed = JSON.parse(settings[0].closed_slots);
+            closedSlotsMap = Array.isArray(parsed) ? {} : parsed;
+          } catch(e) {}
+        }
       }
     } catch (err) {
       console.warn('Error fetching site settings for smart recommendations:', err.message);
@@ -668,8 +686,9 @@ const getSmartRecommendations = async (req, res, next) => {
       const allSlots = buildDaySlots(slotInterval);
       let availableSlots = [...allSlots];
 
-      if (closedSlots.length > 0) {
-        availableSlots = availableSlots.filter(s => !closedSlots.includes(s.substring(0, 5)));
+      const closedForDate = closedSlotsMap[date] || [];
+      if (closedForDate.length > 0) {
+        availableSlots = availableSlots.filter(s => !closedForDate.includes(s) && !closedForDate.includes(s.substring(0, 5)));
       }
 
       const now = new Date();

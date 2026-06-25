@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import AdminLayout from '../../components/admin/AdminLayout';
 import { settingsAPI } from '../../services/api';
+import { formatTime } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import {
   Save, Loader, Shield, Lock, Mail, Eye, EyeOff,
@@ -11,11 +12,18 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [initialSecondaryEmail, setInitialSecondaryEmail] = useState('');
+  const [isEmailUnlocked, setIsEmailUnlocked] = useState(false);
   
-  // OTP Modal State
+  // OTP Modal State for Email Change
   const [otpModalOpen, setOtpModalOpen] = useState(false);
   const [otpValue, setOtpValue] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
+
+  // OTP Modal State for Credential Change
+  const [credOtpModalOpen, setCredOtpModalOpen] = useState(false);
+  const [credOtpValue, setCredOtpValue] = useState('');
+  const [credOtpLoading, setCredOtpLoading] = useState(false);
+  const [pendingCredPayload, setPendingCredPayload] = useState(null);
 
   // ── Site settings form ──
   const [form, setForm] = useState({
@@ -36,6 +44,8 @@ export default function Settings() {
     closed_days: [],
     closed_slots: [],
     slot_interval: 30,
+    open_time: '09:00',
+    close_time: '20:00',
     secondary_alert_email: '',
   });
 
@@ -62,11 +72,14 @@ export default function Settings() {
           let parsedClosedSlots = [];
           try { parsedClosedSlots = rawData.closed_slots ? JSON.parse(rawData.closed_slots) : []; } catch { parsedClosedSlots = []; }
             setInitialSecondaryEmail(rawData.secondary_alert_email || '');
+            if (!rawData.secondary_alert_email) setIsEmailUnlocked(true);
             setForm({
               ...rawData,
               closed_days: parsedClosed,
               closed_slots: parsedClosedSlots,
               slot_interval: rawData.slot_interval ? parseInt(rawData.slot_interval, 10) : 30,
+              open_time: rawData.open_time || '09:00',
+              close_time: rawData.close_time || '20:00',
               secondary_alert_email: rawData.secondary_alert_email || '',
             });
         }
@@ -91,6 +104,8 @@ export default function Settings() {
         closed_days: JSON.stringify(form.closed_days || []),
         closed_slots: JSON.stringify(form.closed_slots || []),
         slot_interval: parseInt(form.slot_interval, 10) || 30,
+        open_time: form.open_time || '09:00',
+        close_time: form.close_time || '20:00',
         // We do NOT send secondary_alert_email here to prevent bypassing OTP.
         // It must be saved via the dedicated "Save Email" button below.
       };
@@ -125,12 +140,19 @@ export default function Settings() {
       if (creds.newEmail) payload.newEmail = creds.newEmail;
       if (creds.newPassword) { payload.newPassword = creds.newPassword; payload.confirmPassword = creds.confirmPassword; }
 
-      const res = await settingsAPI.changeAdminCredentials(payload);
-      toast.success(res.data.message || 'Credentials updated! A security notification has been sent.');
-      setCreds({ currentPassword: '', newEmail: '', newPassword: '', confirmPassword: '' });
-      setCredOpen(false);
+      const res = await settingsAPI.requestCredChangeOtp(payload);
+      
+      if (res.data.otpRequired) {
+        setPendingCredPayload(payload);
+        setCredOtpModalOpen(true);
+      } else {
+        const finalRes = await settingsAPI.changeAdminCredentials(payload);
+        toast.success(finalRes.data.message || 'Credentials updated! A security notification has been sent.');
+        setCreds({ currentPassword: '', newEmail: '', newPassword: '', confirmPassword: '' });
+        setCredOpen(false);
+      }
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to update credentials.';
+      const msg = err.response?.data?.message || 'Failed to request OTP / update credentials.';
       toast.error(msg);
     } finally {
       setCredSaving(false);
@@ -233,21 +255,59 @@ export default function Settings() {
                 </div>
               </div>
 
-              {/* ── Booking Slot Interval ── */}
+              {/* ── Salon Timings & Slot Interval ── */}
               <div className="mt-8 pt-6 border-t border-white/10">
                 <div className="mb-6 flex items-start gap-3">
                   <div className="w-9 h-9 rounded-lg bg-[#C9A84C]/10 flex items-center justify-center shrink-0 mt-0.5">
                     <Clock size={18} className="text-[#C9A84C]" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-display text-white">Booking Slot Interval</h3>
+                    <h3 className="text-lg font-display text-white">Booking Slots & Timings</h3>
                     <p className="text-sm text-white/40 mt-1 font-sans">
-                      Set the time gap between available booking slots. This applies to both the customer booking portal and the admin appointment panel.
+                      Set the opening hours and the time gap between available booking slots. This applies to both the customer booking portal and the admin appointment panel.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                  <div>
+                    <label className={labelClass}>Open Time</label>
+                    <select
+                      name="open_time"
+                      value={form.open_time || '09:00'}
+                      onChange={handleChange}
+                      className={`${inputClass} cursor-pointer`}
+                      required
+                    >
+                      {Array.from({ length: 48 }).map((_, i) => {
+                        const h = Math.floor(i / 2);
+                        const m = (i % 2) * 30;
+                        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                        return (
+                          <option key={val} value={val}>{formatTime(val)}</option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Close Time</label>
+                    <select
+                      name="close_time"
+                      value={form.close_time || '20:00'}
+                      onChange={handleChange}
+                      className={`${inputClass} cursor-pointer`}
+                      required
+                    >
+                      {Array.from({ length: 48 }).map((_, i) => {
+                        const h = Math.floor(i / 2);
+                        const m = (i % 2) * 30;
+                        const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                        return (
+                          <option key={val} value={val}>{formatTime(val)}</option>
+                        );
+                      })}
+                    </select>
+                  </div>
                   <div>
                     <label className={labelClass}>Slot Duration</label>
                     <select
@@ -262,31 +322,34 @@ export default function Settings() {
                       <option value={45}>45 minutes</option>
                       <option value={60}>60 minutes (1 hour)</option>
                     </select>
-                    <p className="text-xs text-white/30 mt-2 font-sans">
-                      Currently: <span className="text-[#C9A84C] font-medium">{form.slot_interval || 30} min</span> slots — {Math.floor((11 * 60) / (form.slot_interval || 30))} slots per day (9:00 AM – 8:00 PM)
-                    </p>
                   </div>
+                </div>
 
-                  <div className="flex items-center">
-                    <div className="w-full bg-white/[0.03] border border-white/8 rounded-xl p-4">
-                      <p className="text-xs text-white/40 font-sans uppercase tracking-wider mb-3">Preview — First slots of the day</p>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const interval = parseInt(form.slot_interval, 10) || 30;
-                          const preview = [];
-                          for (let m = 0; m < interval * 4; m += interval) {
-                            const h = 9 + Math.floor(m / 60);
-                            const min = m % 60;
-                            preview.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
-                          }
-                          return preview.map(s => (
-                            <span key={s} className="px-2.5 py-1 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-lg text-[#C9A84C] text-xs font-mono">
-                              {s}
-                            </span>
-                          ));
-                        })()}
-                        <span className="px-2.5 py-1 text-white/20 text-xs font-mono">…</span>
-                      </div>
+                <div className="mt-6 flex items-center">
+                  <div className="w-full bg-white/[0.03] border border-white/8 rounded-xl p-4">
+                    <p className="text-xs text-white/40 font-sans uppercase tracking-wider mb-3">Preview — First slots of the day</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(() => {
+                        const interval = parseInt(form.slot_interval, 10) || 30;
+                        const parseTime = (str) => {
+                          if (!str) return 0;
+                          const [h, m] = str.split(':').map(Number);
+                          return (h * 60) + (m || 0);
+                        };
+                        const openMins = parseTime(form.open_time || '09:00');
+                        
+                        const preview = [];
+                        for (let m = openMins; m < openMins + (interval * 4); m += interval) {
+                          const h = Math.floor(m / 60);
+                          const min = m % 60;
+                          preview.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+                        }
+                        return preview.map(s => (
+                          <span key={s} className="px-2.5 py-1 bg-[#C9A84C]/10 border border-[#C9A84C]/20 rounded-lg text-[#C9A84C] text-xs font-mono">
+                            {formatTime(s)}
+                          </span>
+                        ));
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -383,26 +446,37 @@ export default function Settings() {
                       type="email"
                       value={form.secondary_alert_email || ''}
                       onChange={e => setForm(prev => ({ ...prev, secondary_alert_email: e.target.value }))}
-                      className="w-full bg-white/[0.04] border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/60 transition-colors placeholder:text-white/20"
+                      disabled={!isEmailUnlocked}
+                      className={`w-full bg-white/[0.04] border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-white text-sm focus:outline-none transition-colors placeholder:text-white/20 ${!isEmailUnlocked ? 'opacity-50 cursor-not-allowed' : 'focus:border-amber-500/60'}`}
                       placeholder="backup@example.com"
                     />
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (initialSecondaryEmail && initialSecondaryEmail !== form.secondary_alert_email) {
-                        // Email changed and old email exists -> request OTP
+                  
+                  {!isEmailUnlocked ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
                         setSaving(true);
                         try {
-                          await settingsAPI.requestEmailOtp({ newEmail: form.secondary_alert_email });
-                          toast.success('OTP sent to your old email address!');
+                          await settingsAPI.requestEmailOtp({});
+                          toast.success('OTP sent to your current email address!');
                           setOtpModalOpen(true);
                         } catch (err) {
                           toast.error(err.response?.data?.message || 'Failed to request OTP');
                         } finally {
                           setSaving(false);
                         }
-                      } else {
-                        // No old email, or just re-saving the same one -> update directly
+                      }}
+                      disabled={saving}
+                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white text-sm font-sans rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+                    >
+                      {saving ? <Loader size={15} className="animate-spin" /> : <Shield size={15} />}
+                      Change Email
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={async () => {
                         setSaving(true);
                         try {
                           const payload = {
@@ -414,18 +488,21 @@ export default function Settings() {
                           };
                           await settingsAPI.update(payload);
                           setInitialSecondaryEmail(form.secondary_alert_email || '');
+                          if (form.secondary_alert_email) setIsEmailUnlocked(false);
                           toast.success('Secondary alert email saved!');
-                        } catch { toast.error('Failed to save.'); }
-                        finally { setSaving(false); }
-                      }
-                    }}
-                    disabled={saving}
-                    type="button"
-                    className="px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 text-sm font-sans rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
-                  >
-                    {saving ? <Loader size={13} className="animate-spin" /> : <Save size={13} />}
-                    Save Email
-                  </button>
+                        } catch (err) {
+                          toast.error('Failed to save email');
+                        } finally {
+                          setSaving(false);
+                        }
+                      }}
+                      disabled={saving}
+                      className="px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 text-sm font-sans rounded-lg border border-amber-500/20 transition-colors flex items-center gap-2 whitespace-nowrap disabled:opacity-50"
+                    >
+                      {saving ? <Loader size={15} className="animate-spin" /> : <Save size={15} />}
+                      Save Email
+                    </button>
+                  )}
                 </div>
                 {form.secondary_alert_email && (
                   <div className="flex items-center gap-2 mt-2">
@@ -454,9 +531,9 @@ export default function Settings() {
                           onClick={async () => {
                             setOtpLoading(true);
                             try {
-                              await settingsAPI.verifyEmailOtp({ newEmail: form.secondary_alert_email, otp: otpValue });
-                              toast.success('Secondary email updated successfully!');
-                              setInitialSecondaryEmail(form.secondary_alert_email);
+                              await settingsAPI.verifyEmailOtp({ newEmail: initialSecondaryEmail, otp: otpValue });
+                              toast.success('Verified! You can now edit the email address.');
+                              setIsEmailUnlocked(true);
                               setOtpModalOpen(false);
                               setOtpValue('');
                             } catch (err) {
@@ -531,7 +608,7 @@ export default function Settings() {
                             placeholder="Enter your current password"
                           />
                           <button type="button" onClick={() => setShowCurrentPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
-                            {showCurrentPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                            {showCurrentPw ? <Eye size={14} /> : <EyeOff size={14} />}
                           </button>
                         </div>
                       </div>
@@ -571,7 +648,7 @@ export default function Settings() {
                               placeholder="Min. 8 characters"
                             />
                             <button type="button" onClick={() => setShowNewPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
-                              {showNewPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                              {showNewPw ? <Eye size={14} /> : <EyeOff size={14} />}
                             </button>
                           </div>
                         </div>
@@ -596,7 +673,7 @@ export default function Settings() {
                               placeholder="Re-enter new password"
                             />
                             <button type="button" onClick={() => setShowConfirmPw(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
-                              {showConfirmPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                              {showConfirmPw ? <Eye size={14} /> : <EyeOff size={14} />}
                             </button>
                           </div>
                           {creds.newPassword && creds.confirmPassword && (
@@ -626,6 +703,51 @@ export default function Settings() {
                       </div>
 
                     </form>
+                  </div>
+                )}
+                
+                {/* OTP Modal for Credentials Change */}
+                {credOtpModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-[#111] border border-white/10 p-6 rounded-2xl w-full max-w-sm shadow-2xl relative">
+                      <h3 className="text-lg font-display text-white mb-2">Verify Credentials Update</h3>
+                      <p className="text-xs text-white/50 mb-4 font-sans">Enter the 6-digit OTP sent to your secondary email address to authorize these changes.</p>
+                      <input
+                        type="text"
+                        value={credOtpValue}
+                        onChange={e => setCredOtpValue(e.target.value)}
+                        placeholder="123456"
+                        maxLength={6}
+                        className="w-full bg-white/[0.04] border border-white/10 rounded-lg px-4 py-3 text-center text-2xl tracking-[0.5em] font-mono text-white mb-4 focus:outline-none focus:border-amber-500/60"
+                      />
+                      <div className="flex justify-end gap-3">
+                        <button onClick={() => { setCredOtpModalOpen(false); setCredOtpValue(''); setPendingCredPayload(null); }} className="px-4 py-2 text-sm text-white/40 hover:text-white/70 font-sans transition-colors">Cancel</button>
+                        <button
+                          onClick={async () => {
+                            setCredOtpLoading(true);
+                            try {
+                              const finalPayload = { ...pendingCredPayload, otp: credOtpValue };
+                              const res = await settingsAPI.changeAdminCredentials(finalPayload);
+                              toast.success(res.data.message || 'Credentials updated! A security notification has been sent.');
+                              setCredOtpModalOpen(false);
+                              setCredOtpValue('');
+                              setPendingCredPayload(null);
+                              setCreds({ currentPassword: '', newEmail: '', newPassword: '', confirmPassword: '' });
+                              setCredOpen(false);
+                            } catch (err) {
+                              toast.error(err.response?.data?.message || 'Invalid OTP');
+                            } finally {
+                              setCredOtpLoading(false);
+                            }
+                          }}
+                          disabled={credOtpLoading || credOtpValue.length < 6}
+                          className="bg-amber-500 hover:bg-amber-400 text-black font-semibold font-sans text-sm rounded-lg px-5 py-2 transition-colors disabled:opacity-60 flex items-center gap-2"
+                        >
+                          {credOtpLoading && <Loader size={14} className="animate-spin" />}
+                          Verify & Update
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

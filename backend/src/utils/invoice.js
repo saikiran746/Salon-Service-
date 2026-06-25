@@ -40,21 +40,26 @@ const generateInvoicePDF = async (billData, billId, salonSettings = {}) => {
     // 1. TOP BRANDING SECTION (Center-aligned) — uses settings
     const pageWidth = doc.page.width;
     
-    doc.fillColor(black).fontSize(14).font('Helvetica-Bold').text(s.site_name, 0, 50, { align: 'center', width: pageWidth });
-    doc.fillColor(lightGray).fontSize(9).font('Helvetica').text(s.address, 0, 68, { align: 'center', width: pageWidth });
-    doc.text(`Phone: ${s.phone} | Email: ${s.email}`, 0, 81, { align: 'center', width: pageWidth });
+    // Start at top margin
+    doc.y = 50;
+    doc.fillColor(black).fontSize(14).font('Helvetica-Bold').text(s.site_name, 0, doc.y, { align: 'center', width: pageWidth });
+    doc.fillColor(lightGray).fontSize(9).font('Helvetica').text(s.address, { align: 'center', width: pageWidth });
+    doc.text(`Phone: ${s.phone} | Email: ${s.email}`, { align: 'center', width: pageWidth });
     if (s.gstin) {
-      doc.text(`GSTIN: ${s.gstin}`, 0, 94, { align: 'center', width: pageWidth });
+      doc.text(`GSTIN: ${s.gstin}`, { align: 'center', width: pageWidth });
     }
 
-    // Huge bold INVOICE label
-    doc.fillColor(black).fontSize(26).font('Helvetica-Bold').text('INVOICE', 0, 115, { align: 'center', width: pageWidth });
+    doc.moveDown(1.5);
 
-    // Gold decorative horizontal divider line behind/underneath INVOICE label
-    doc.moveTo(50, 150).lineTo(doc.page.width - 50, 150).strokeColor(gold).lineWidth(1).stroke();
+    // Huge bold INVOICE label
+    doc.fillColor(black).fontSize(26).font('Helvetica-Bold').text('INVOICE', { align: 'center', width: pageWidth });
+
+    // Gold decorative horizontal divider line underneath INVOICE label
+    const dividerY = doc.y + 10;
+    doc.moveTo(50, dividerY).lineTo(pageWidth - 50, dividerY).strokeColor(gold).lineWidth(1).stroke();
 
     // 2. CUSTOMER & METADATA SECTIONS (Side-by-Side)
-    const clientY = 170;
+    const clientY = dividerY + 20;
 
     // Left Side: Bill To
     doc.fillColor(black).fontSize(9).font('Helvetica-Bold').text('BILL TO:', 50, clientY);

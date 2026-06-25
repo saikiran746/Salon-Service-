@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import AdminLayout from '../../components/admin/AdminLayout';
 import { customersAPI } from '../../services/api';
-import { Search, Crown, Users, UserCheck, UserX, X, Phone, Mail, AlertTriangle } from 'lucide-react';
+import { Search, Crown, Users, UserCheck, UserX, X, Phone, Mail, AlertTriangle, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 // ReturningClientsModal removed
 
@@ -17,7 +18,7 @@ export default function AdminCustomers() {
     customersAPI.getStats().then(r => setStats(r.data.data)).catch(() => {});
   }, []);
 
-  useEffect(() => {
+  const loadCustomers = () => {
     setLoading(true);
     const params = { ...filters, limit: 20 };
     Object.keys(params).forEach(k => !params[k] && delete params[k]);
@@ -25,7 +26,24 @@ export default function AdminCustomers() {
       .then(r => { setCustomers(r.data.data); setPagination(r.data.pagination || {}); })
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadCustomers();
   }, [filters]);
+
+  const handleDeleteCustomer = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this customer? This will also remove their bills and appointments.")) return;
+    try {
+      await customersAPI.delete(id);
+      toast.success('Customer deleted successfully');
+      loadCustomers();
+      // update stats as well
+      customersAPI.getStats().then(r => setStats(r.data.data)).catch(() => {});
+    } catch (error) {
+      toast.error('Failed to delete customer');
+    }
+  };
 
   return (
     <AdminLayout title="Customers">
@@ -106,8 +124,11 @@ export default function AdminCustomers() {
                 <td className="table-cell text-xs text-salon-muted">
                   {c.last_visit ? new Date(c.last_visit).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: '2-digit' }) : 'Never'}
                 </td>
-                <td className="table-cell">
+                <td className="table-cell px-6 py-4 flex items-center gap-4">
                   <Link to={`/admin/customers/${c.id}`} className="text-gold-500 text-xs font-sans tracking-wider hover:text-gold-400">View →</Link>
+                  <button onClick={() => handleDeleteCustomer(c.id)} className="text-salon-muted hover:text-red-500 transition-colors" title="Delete customer">
+                    <Trash2 size={15} />
+                  </button>
                 </td>
               </tr>
             ))}

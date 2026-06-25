@@ -421,4 +421,25 @@ const getMyBills = async (req, res, next) => {
   } catch (error) { next(error); }
 };
 
-module.exports = { createBill, getAllBills, getBillById, downloadInvoice, viewInvoice, getMyBills };
+const deleteBill = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const [bills] = await pool.execute('SELECT * FROM bills WHERE id = ?', [id]);
+    if (!bills.length) return res.status(404).json({ success: false, message: 'Bill not found' });
+    
+    const bill = bills[0];
+
+    // Delete bill items and bill
+    await pool.execute('DELETE FROM bill_items WHERE bill_id = ?', [id]);
+    await pool.execute('DELETE FROM bills WHERE id = ?', [id]);
+
+    // Revert appointment status if linked
+    if (bill.appointment_id) {
+      await pool.execute('UPDATE appointments SET status = ? WHERE id = ?', ['confirmed', bill.appointment_id]);
+    }
+
+    res.json({ success: true, message: 'Bill deleted successfully' });
+  } catch (error) { next(error); }
+};
+
+module.exports = { createBill, getAllBills, getBillById, downloadInvoice, viewInvoice, getMyBills, deleteBill };
