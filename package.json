@@ -4,6 +4,7 @@
   "description": "Root package to run both frontend and backend easily",
   "scripts": {
     "start": "cd backend && npm start",
+    "postinstall": "cd backend && npm install",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
