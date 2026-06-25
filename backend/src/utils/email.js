@@ -188,7 +188,7 @@ const templates = {
       💈 <strong>Ready for your next transformation?</strong> Explore our trending services, book your next session with your favorite artisan, and unlock exclusive loyalty rewards. 💎
     </div>
     <p>Thank you for choosing us to help you look and feel your absolute best! ✦</p>
-    <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" class="btn">BOOK YOUR SESSION NOW</a>`, settings),
+    <a href="${process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173')}" class="btn">BOOK YOUR SESSION NOW</a>`, settings),
 
   // Security alert — sent to secondary_alert_email when admin credentials are changed
   // Uses the same SMTP transport as all other emails; does NOT affect invoice/booking/login flows

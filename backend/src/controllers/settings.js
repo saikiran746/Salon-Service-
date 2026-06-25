@@ -374,7 +374,7 @@ const changeAdminCredentials = async (req, res, next) => {
           [uuidv4(), user.id, magicToken, magicExpiry]
         );
 
-        const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const frontendBase = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173');
         const secureLink = `${frontendBase}/admin/secure-login?token=${magicToken}`;
 
         await sendEmail({

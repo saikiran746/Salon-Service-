@@ -434,9 +434,9 @@ async function initializePostgresSchema(pool) {
     const [tempRow] = await pool.execute('SELECT * FROM email_templates');
     if (tempRow.length === 0) {
       const templates = [
-        { id: uuidv4(), name: '30-Day Win-Back', subject: 'We miss you, {{name}}! 💛', body: 'Dear {{name}},\n\nIt\'s been 30 days since your last visit. We\'d love to welcome you back!\n\nBook now: ' + (process.env.FRONTEND_URL || 'http://localhost:5173') + '/book', trigger_days: 30 },
-        { id: uuidv4(), name: '60-Day Win-Back', subject: 'Come back to Luxe Salon, {{name}} 🌟', body: 'Dear {{name}},\n\nWe haven\'t seen you in 2 months! Your style awaits.\n\nEnjoy 10% off your next visit. Book now: ' + (process.env.FRONTEND_URL || 'http://localhost:5173') + '/book', trigger_days: 60 },
-        { id: uuidv4(), name: '90-Day Win-Back', subject: 'Special offer just for you, {{name}} ✨', body: 'Dear {{name}},\n\nIt\'s been 3 months! We miss you. Come back and enjoy 15% off.\n\nBook now: ' + (process.env.FRONTEND_URL || 'http://localhost:5173') + '/book', trigger_days: 90 },
+        { id: uuidv4(), name: '30-Day Win-Back', subject: 'We miss you, {{name}}! 💛', body: 'Dear {{name}},\n\nIt\'s been 30 days since your last visit. We\'d love to welcome you back!\n\nBook now: ' + (process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173')) + '/book', trigger_days: 30 },
+        { id: uuidv4(), name: '60-Day Win-Back', subject: 'Come back to Luxe Salon, {{name}} 🌟', body: 'Dear {{name}},\n\nWe haven\'t seen you in 2 months! Your style awaits.\n\nEnjoy 10% off your next visit. Book now: ' + (process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173')) + '/book', trigger_days: 60 },
+        { id: uuidv4(), name: '90-Day Win-Back', subject: 'Special offer just for you, {{name}} ✨', body: 'Dear {{name}},\n\nIt\'s been 3 months! We miss you. Come back and enjoy 15% off.\n\nBook now: ' + (process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173')) + '/book', trigger_days: 90 },
       ];
       for (const t of templates) {
         await pool.execute(
