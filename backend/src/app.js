@@ -205,6 +205,53 @@ app.get('/api/test-email', async (req, res) => {
   }
 });
 
+app.get('/api/diagnostics/smtp', async (req, res) => {
+  const dns = require('dns');
+  const net = require('net');
+  const results = { dns: null, port587: null, port465: null };
+
+  const checkConnection = (port) => {
+    return new Promise((resolve) => {
+      const socket = new net.Socket();
+      const startTime = Date.now();
+      socket.setTimeout(5000);
+      socket.on('connect', () => {
+        socket.destroy();
+        resolve({ success: true, latencyMs: Date.now() - startTime });
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        resolve({ success: false, error: 'Connection Timeout (likely blocked by Railway)' });
+      });
+      socket.on('error', (err) => {
+        socket.destroy();
+        resolve({ success: false, error: err.message });
+      });
+      socket.connect(port, 'smtp.gmail.com');
+    });
+  };
+
+  try {
+    results.dns = await new Promise((resolve) => {
+      dns.resolve('smtp.gmail.com', (err, addresses) => {
+        if (err) resolve({ success: false, error: err.message });
+        else resolve({ success: true, addresses });
+      });
+    });
+
+    console.log('[DIAGNOSTIC] Running raw TCP test to smtp.gmail.com:587...');
+    results.port587 = await checkConnection(587);
+    
+    console.log('[DIAGNOSTIC] Running raw TCP test to smtp.gmail.com:465...');
+    results.port465 = await checkConnection(465);
+
+    console.log('[DIAGNOSTIC] SMTP Results:', results);
+    res.json({ success: true, message: 'SMTP Diagnostic Results', results });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Diagnostic failed', error: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });

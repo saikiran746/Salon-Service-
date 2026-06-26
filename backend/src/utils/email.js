@@ -1,91 +1,18 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { google } = require('googleapis');
 const { pool } = require('../config/database');
 
-const getOAuth2Client = () => {
-  const OAuth2 = google.auth.OAuth2;
-  const oauth2Client = new OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    'https://developers.google.com/oauthplayground'
-  );
-  oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
-  return oauth2Client;
-};
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Check environment variables on startup
 const checkEmailEnv = () => {
   console.log('[EMAIL] Checking environment variables...');
-  const vars = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME'];
-  vars.forEach(v => {
-    if (!process.env[v]) {
-      console.warn(`[EMAIL WARNING] Environment variable ${v} is missing.`);
-    } else {
-      console.log(`[EMAIL INFO] ${v} is set.`);
-    }
-  });
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('[EMAIL WARNING] RESEND_API_KEY is missing. Emails will be logged to the console instead of being delivered.');
+  } else {
+    console.log('[EMAIL INFO] RESEND_API_KEY is configured.');
+  }
 };
 checkEmailEnv();
-
-const testTransporterConfig = (config) => {
-  return new Promise((resolve) => {
-    const transporter = nodemailer.createTransport(config);
-    transporter.verify((error, success) => {
-      if (error) {
-        resolve({ success: false, error });
-      } else {
-        resolve({ success: true });
-      }
-    });
-  });
-};
-
-const verifySMTPConnection = async () => {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.error('[EMAIL] SMTP verification skipped: Missing credentials.');
-    return;
-  }
-  
-  const envHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const envPort = Number(process.env.SMTP_PORT); // Explicitly parsed as a Number
-  const isSecure = process.env.SMTP_SECURE === 'true';
-
-  const configsToTest = [
-    {
-      name: "Environment Config (Port 587 / TLS)",
-      host: envHost,
-      port: envPort || 587,
-      secure: envPort ? isSecure : false,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000
-    },
-    {
-      name: "Fallback Config (Port 465 / SSL)",
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000
-    }
-  ];
-
-  for (const conf of configsToTest) {
-    console.log(`[EMAIL] Testing SMTP Configuration: ${conf.name}`);
-    console.log(`[EMAIL] Config Details -> host: ${conf.host}, port: ${conf.port}, secure: ${conf.secure}, connectionTimeout: ${conf.connectionTimeout}, greetingTimeout: ${conf.greetingTimeout}`);
-    
-    const result = await testTransporterConfig(conf);
-    if (result.success) {
-      console.log(`[EMAIL] SMTP connection verified successfully using ${conf.name}`);
-      // Break early if we just want to test one, but for full diagnostic logs let's test both if the first fails.
-      return; 
-    } else {
-      console.error(`[EMAIL] SMTP verification failed for ${conf.name}:`, result.error);
-    }
-  }
-};
-verifySMTPConnection();
 
 const fetchEmailSettings = async () => {
   try {
@@ -288,57 +215,48 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
     const settings = await fetchEmailSettings();
     const htmlContent = html || (templates[template] ? templates[template](data || {}, settings) : baseTemplate(html || '', settings));
     const fromName = process.env.EMAIL_FROM_NAME || settings.site_name || 'TONI & GUY ESSENSUALS';
+    const fromEmail = process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev'; // Use Resend's default testing domain if missing
 
     let finalSubject = subject;
     if (finalSubject) {
       finalSubject = finalSubject.replace(/Luxe Salon/gi, settings.site_name || 'TONI & GUY ESSENSUALS');
     }
 
-    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('[EMAIL] Failed: Missing SMTP credentials in environment variables.');
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('[EMAIL WARNING] RESEND_API_KEY is not set! Skipping email delivery. Dumping email info for debug:');
+      console.log(`[EMAIL DUMP] To: ${to} | Subject: ${finalSubject}`);
+      return true; // Return true to not break the application flow when testing locally
+    }
+
+    console.log('[EMAIL] Sending via Resend API...');
+    const payload = {
+      from: `"${fromName}" <${fromEmail}>`,
+      to: Array.isArray(to) ? to : [to],
+      subject: finalSubject,
+      html: htmlContent,
+      headers: {
+        'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System`
+      }
+    };
+    
+    if (attachments && attachments.length > 0) {
+      payload.attachments = attachments.map(att => ({
+        filename: att.filename,
+        content: att.content 
+      }));
+    }
+
+    const { data: resendData, error } = await resend.emails.send(payload);
+
+    if (error) {
+      console.error(`[EMAIL] Failed:`, error);
       return false;
     }
 
-    const portParsed = Number(process.env.SMTP_PORT) || 587;
-    const isSecure = portParsed === 465 ? true : (process.env.SMTP_SECURE === 'true');
-
-    const config = {
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: portParsed,
-      secure: isSecure,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000
-    };
-
-    console.log(`[EMAIL] Final Transporter Config (excluding password): host=${config.host}, port=${config.port}, secure=${config.secure}, connectionTimeout=${config.connectionTimeout}, greetingTimeout=${config.greetingTimeout}`);
-    const transporter = nodemailer.createTransport(config);
-    console.log('[EMAIL] SMTP transporter created');
-
-    console.log('[EMAIL] Sending...');
-    await transporter.sendMail({
-      from: `"${fromName}" <${process.env.SMTP_USER}>`,
-      replyTo: process.env.SMTP_USER,
-      to, subject: finalSubject,
-      html: htmlContent,
-      text: htmlContent.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim(),
-      attachments: attachments || [],
-      headers: {
-        'X-Priority': '1',
-        'X-MSMail-Priority': 'High',
-        'Importance': 'high',
-        'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System`,
-        'Precedence': 'bulk',
-        'List-Unsubscribe': `<mailto:${process.env.SMTP_USER}>`,
-      },
-    });
-    console.log(`[EMAIL] Success`);
+    console.log(`[EMAIL] Success (ID: ${resendData.id})`);
     return true;
   } catch (error) {
-    console.error(`[EMAIL] Failed:`, error);
+    console.error(`[EMAIL] Exception:`, error);
     return false;
   }
 };
