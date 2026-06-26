@@ -22,7 +22,7 @@ export default function Register() {
     try {
       const { data } = await authAPI.register({ name: form.name, email: form.email, phone: form.phone, password: form.password });
       login(data.data.user, data.data.token, data.data.refreshToken);
-      toast.success('Account created! Welcome to Luxe Salon.');
+      toast.success('Account created! Welcome to TONI & GUY.');
       navigate('/dashboard');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Registration failed.');
@@ -34,7 +34,7 @@ export default function Register() {
     try {
       const { data } = await authAPI.googleLogin({ token: tokenResponse.access_token });
       login(data.data.user, data.data.token, data.data.refreshToken);
-      toast.success('Account accessed! Welcome to Luxe Salon.');
+      toast.success('Account accessed! Welcome to TONI & GUY.');
       navigate('/dashboard');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Google signup failed.');
@@ -57,7 +57,7 @@ export default function Register() {
           <Link to="/" className="text-gold-500/60 text-xs font-sans tracking-widest uppercase flex items-center gap-2 mb-16 hover:text-gold-500">
             <ArrowLeft size={12} /> Back to Home
           </Link>
-          <div className="font-display text-gold-500 text-2xl tracking-widest mb-2">✦ LUXE SALON</div>
+          <div className="font-display text-gold-500 text-2xl tracking-widest mb-2">✦ TONI & GUY</div>
           <h2 className="font-display text-5xl text-white font-light leading-tight mb-6">Begin Your<br />Journey</h2>
           <p className="text-white/50 font-body leading-relaxed max-w-sm">
             Create your account to book appointments, track your history and unlock exclusive member benefits.
@@ -71,7 +71,7 @@ export default function Register() {
           </Link>
           <div className="mb-10">
             <h1 className="font-display text-4xl text-salon-white font-light mb-2">Create Account</h1>
-            <p className="text-salon-muted text-sm font-body">Join the Luxe Salon community</p>
+            <p className="text-salon-muted text-sm font-body">Join the TONI & GUY community</p>
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             {[

@@ -35,7 +35,7 @@ export default function ForgotPassword() {
         <Link to="/login" className="text-gold-500/60 text-xs font-sans tracking-widest uppercase flex items-center gap-2 mb-10 hover:text-gold-500">
           <ArrowLeft size={12} /> Back to Login
         </Link>
-        <div className="font-display text-gold-500 text-xl tracking-widest mb-8">✦ LUXE SALON</div>
+        <div className="font-display text-gold-500 text-xl tracking-widest mb-8">✦ TONI & GUY</div>
         {!sent ? (
           <>
             <h1 className="font-display text-4xl text-salon-white font-light mb-2">Reset Password</h1>

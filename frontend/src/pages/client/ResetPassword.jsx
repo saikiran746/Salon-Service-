@@ -91,7 +91,7 @@ export default function ResetPassword() {
           <ArrowLeft size={12} /> Back to Login
         </Link>
         
-        <div className="font-display text-gold-500 text-xl tracking-widest mb-8">✦ LUXE SALON</div>
+        <div className="font-display text-gold-500 text-xl tracking-widest mb-8">✦ TONI & GUY</div>
         
         <h1 className="font-display text-4xl text-salon-white font-light mb-2">Create New Password</h1>
         <p className="text-salon-muted text-sm font-body mb-8">

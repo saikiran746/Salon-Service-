@@ -42,7 +42,16 @@ export default function Navbar() {
         {/* Logo */}
         <Link to="/" className="flex flex-col leading-none group max-w-[200px] md:max-w-none">
           <span className="font-display text-gold-500 text-lg font-semibold tracking-[0.1em] group-hover:text-gold-400 transition-colors uppercase truncate md:overflow-visible md:whitespace-normal">
-            ✦ {siteName}
+            <span
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate('/admin/login');
+              }}
+              className="cursor-pointer hover:scale-105 inline-block transition-transform duration-300"
+            >
+              ✦
+            </span> {siteName}
           </span>
         </Link>
 

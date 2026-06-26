@@ -65,7 +65,7 @@ export default function Login() {
           <Link to="/" className="text-gold-500/60 text-xs font-sans tracking-widest uppercase flex items-center gap-2 mb-16 hover:text-gold-500 transition-colors">
             <ArrowLeft size={12} /> Back to Home
           </Link>
-          <div className="font-display text-gold-500 text-2xl tracking-widest mb-2">✦ LUXE SALON</div>
+          <div className="font-display text-gold-500 text-2xl tracking-widest mb-2">✦ TONI & GUY</div>
           <h2 className="font-display text-5xl text-white font-light leading-tight mb-6">
             Welcome<br />Back
           </h2>
@@ -84,7 +84,7 @@ export default function Login() {
 
           <div className="mb-10">
             <h1 className="font-display text-4xl text-salon-white font-light mb-2">Sign In</h1>
-            <p className="text-salon-muted text-sm font-body">Access your Luxe Salon account</p>
+            <p className="text-salon-muted text-sm font-body">Access your TONI & GUY account</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">

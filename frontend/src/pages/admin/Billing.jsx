@@ -1414,7 +1414,7 @@ _TONI & GUY Essensuals Team_`;
                 width="100%" 
                 height="100%" 
                 style={{ border: 'none' }}
-                title="Luxe Salon Invoice PDF"
+                title="TONI & GUY Invoice PDF"
               />
             </div>
 
