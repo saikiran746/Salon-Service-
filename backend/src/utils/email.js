@@ -2,7 +2,6 @@ const nodemailer = require('nodemailer');
 const { google } = require('googleapis');
 const { pool } = require('../config/database');
 
-// Build Gmail OAuth2 client
 const getOAuth2Client = () => {
   const OAuth2 = google.auth.OAuth2;
   const oauth2Client = new OAuth2(
@@ -13,6 +12,20 @@ const getOAuth2Client = () => {
   oauth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
   return oauth2Client;
 };
+
+// Check environment variables on startup
+const checkEmailEnv = () => {
+  console.log('[EMAIL] Checking environment variables...');
+  const vars = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_USER', 'SMTP_PASS', 'EMAIL_FROM_ADDRESS', 'EMAIL_FROM_NAME'];
+  vars.forEach(v => {
+    if (!process.env[v]) {
+      console.warn(`[EMAIL WARNING] Environment variable ${v} is missing.`);
+    } else {
+      console.log(`[EMAIL INFO] ${v} is set.`);
+    }
+  });
+};
+checkEmailEnv();
 
 const fetchEmailSettings = async () => {
   try {
@@ -210,6 +223,7 @@ const templates = {
 };
 
 const sendEmail = async ({ to, subject, template, data, html, attachments }) => {
+  console.log(`[EMAIL] Attempting to send email to ${to}`);
   try {
     const settings = await fetchEmailSettings();
     const htmlContent = html || (templates[template] ? templates[template](data || {}, settings) : baseTemplate(html || '', settings));
@@ -221,7 +235,7 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
     }
 
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-      console.error('Email send error: Missing SMTP credentials in environment variables.');
+      console.error('[EMAIL] Failed: Missing SMTP credentials in environment variables.');
       return false;
     }
 
@@ -234,7 +248,9 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
         pass: process.env.SMTP_PASS,
       },
     });
+    console.log('[EMAIL] SMTP transporter created');
 
+    console.log('[EMAIL] Sending...');
     await transporter.sendMail({
       from: `"${fromName}" <${process.env.SMTP_USER}>`,
       replyTo: process.env.SMTP_USER,
@@ -251,10 +267,10 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
         'List-Unsubscribe': `<mailto:${process.env.SMTP_USER}>`,
       },
     });
-    console.log(`Email sent to ${to}: ${subject}`);
+    console.log(`[EMAIL] Success`);
     return true;
   } catch (error) {
-    console.error('Email send error:', error);
+    console.error(`[EMAIL] Failed:`, error);
     return false;
   }
 };

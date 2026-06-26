@@ -180,6 +180,31 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 
 
+// Test email route
+app.get('/api/test-email', async (req, res) => {
+  const { sendEmail } = require('./utils/email');
+  try {
+    const success = await sendEmail({
+      to: 'essensualskondapur@gmail.com',
+      subject: 'Test Email Diagnostic (System Check)',
+      template: 'welcome',
+      data: {
+        name: 'Admin Test',
+        loginUrl: process.env.FRONTEND_URL + '/login'
+      }
+    });
+    
+    if (success) {
+      res.json({ success: true, message: 'Test email successfully sent. Check Railway logs for SMTP details.' });
+    } else {
+      res.status(500).json({ success: false, message: 'Test email failed. Check Railway logs for the full SMTP error.' });
+    }
+  } catch (error) {
+    console.error('Test route error:', error);
+    res.status(500).json({ success: false, message: 'Error in test route', error: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found` });
