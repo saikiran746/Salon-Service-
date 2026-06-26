@@ -10,9 +10,14 @@ async function startServer() {
   const app = require('./app');
   const { startCronJobs } = require('./services/cronService');
   app.listen(PORT, '0.0.0.0', () => {
+    const isProd = process.env.NODE_ENV === 'production';
+    const baseUrl = isProd 
+      ? (process.env.BACKEND_URL || process.env.API_BASE_URL || `https://salon-service-production-d310.up.railway.app`)
+      : `http://localhost:${PORT}`;
+
     console.log(`🚀 Salon Management Server running on port ${PORT}`);
     console.log(`📌 Environment: ${process.env.NODE_ENV}`);
-    console.log(`🌐 API Base URL: http://localhost:${PORT}/api`);
+    console.log(`🌐 API Base URL: ${baseUrl}/api`);
   });
 
   startCronJobs();

@@ -6,6 +6,9 @@ const path = require('path');
 
 const app = express();
 
+// Trust the proxy (Render, Vercel, Railway, etc.) for rate limiters
+app.set('trust proxy', 1);
+
 // Custom API request logger
 app.use((req, res, next) => {
   console.log(`[API REQUEST] ${req.method} ${req.originalUrl}`);
