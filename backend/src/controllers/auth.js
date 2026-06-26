@@ -75,13 +75,13 @@ const register = async (req, res, next) => {
       [uuidv4(), 'ADMIN', 'New Client Registration', `${name} registered a new account.||client||${name}||${email}||${phone || ''}`, 'client']
     );
 
-    // Send welcome email
-    await sendEmail({
+    // Send welcome email asynchronously
+    sendEmail({
       to: email,
       subject: 'Welcome to Luxe Salon ✨',
       template: 'welcome',
       data: { name, loginUrl: `${process.env.FRONTEND_URL}/login` },
-    });
+    }).catch(e => console.error('Background welcome email failed:', e));
 
     const { token, refreshToken } = generateTokens({ id: userId, email, role: 'customer' });
     res.status(201).json({

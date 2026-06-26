@@ -127,11 +127,11 @@ const membershipController = {
         [uuidv4(), 'ADMIN', 'Membership Purchased', `${customerData.name} purchased ${plan[0].name} plan.`, 'membership']
       );
 
-      await sendEmail({
+      sendEmail({
         to: customerData.email, subject: 'Welcome to Luxe Salon Membership! 🌟',
         template: 'membership-welcome',
         data: { name: customerData.name, plan: plan[0].name, expiry: expiry.toLocaleDateString('en-IN'), discount: plan[0].discount },
-      });
+      }).catch(e => console.error('Background membership email failed:', e));
 
       res.json({ success: true, message: `${plan[0].name} activated!`, data: { expiry } });
     } catch (e) { next(e); }
@@ -233,10 +233,12 @@ const leadsController = {
         );
       }
 
-      await sendEmail({
-        to: process.env.ADMIN_EMAIL, subject: '🔔 New Lead - Luxe Salon',
-        template: 'new-lead', data: { name, email, phone, source, page_visited },
-      }).catch(() => {});
+      sendEmail({
+        to: process.env.ADMIN_EMAIL || 'admin@luxesalon.local',
+        subject: 'New Lead Captured - Luxe Salon',
+        template: 'new-lead',
+        data: { name, email, phone, source, page_visited },
+      }).catch(e => console.error('Background lead email failed:', e));
       res.status(201).json({ success: true, message: 'Lead captured.' });
     } catch (e) { next(e); }
   },
@@ -1152,7 +1154,7 @@ const emailMarketingController = {
       let sent = 0;
       for (const customer of emailList) {
         try {
-          await sendEmail({ to: customer.email, subject, html: body.replace('{{name}}', customer.name) });
+          sendEmail({ to: customer.email, subject, html: body.replace('{{name}}', customer.name) }).catch(e => console.error('Background mass email failed:', e));
           sent++;
         } catch { continue; }
       }

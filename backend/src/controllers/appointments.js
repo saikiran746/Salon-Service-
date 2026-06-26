@@ -224,7 +224,7 @@ const createAppointment = async (req, res, next) => {
       if (custData.length > 0 && custData[0].email) {
         const [staffData] = staffIdVal ? await pool.execute('SELECT name FROM staff WHERE id = ?', [staffIdVal]) : [[[]]];
         const servicesNames = fetchedServices.map(s => s.name).join(', ');
-        await sendEmail({
+        sendEmail({
           to: custData[0].email,
           subject: 'Appointment Confirmed - Luxe Salon',
           template: 'appointment-confirmation',
@@ -500,7 +500,7 @@ const updateAppointment = async (req, res, next) => {
           template = 'appointment-rescheduled';
         }
 
-        await sendEmail({
+        sendEmail({
           to: custData[0].email,
           subject,
           template,

@@ -227,11 +227,11 @@ const requestCredChangeOtp = async (req, res, next) => {
       <p style="color:#999;font-size:12px;">This code expires in 15 minutes. If you did not request this, please ignore this email and your credentials will remain unchanged.</p>
     `;
 
-    await sendEmail({
+    sendEmail({
       to: secondaryEmail,
       subject: 'OTP to Authorize Admin Credentials Change',
       html: emailHtml
-    });
+    }).catch(e => console.error('Background OTP email failed:', e));
 
     res.json({ success: true, otpRequired: true, message: 'OTP sent to your secondary alert email.' });
   } catch (error) {
@@ -377,7 +377,7 @@ const changeAdminCredentials = async (req, res, next) => {
         const frontendBase = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173');
         const secureLink = `${frontendBase}/admin/secure-login?token=${magicToken}`;
 
-        await sendEmail({
+        sendEmail({
           to: secondaryEmail,
           subject: '⚠️ Admin Credentials Changed – TONI & GUY Salon',
           template: 'admin-credentials-changed',
@@ -388,7 +388,7 @@ const changeAdminCredentials = async (req, res, next) => {
             changedAt: nowStr,
             loginUrl: secureLink,
           },
-        });
+        }).catch(e => console.error('Background alert email failed:', e));
         console.log(`🔐 Security alert sent to secondary email: ${secondaryEmail}`);
       }
     } catch (emailErr) {
@@ -429,11 +429,11 @@ const requestEmailOtp = async (req, res, next) => {
       <p style="color:#999;font-size:12px;">This code expires in 15 minutes. If you did not request this, please ignore this email.</p>
     `;
 
-    await sendEmail({
+    sendEmail({
       to: oldEmail,
       subject: 'OTP to Change Secondary Alert Email',
       html: emailHtml
-    });
+    }).catch(e => console.error('Background OTP email failed:', e));
 
     res.json({ success: true, message: 'OTP sent to your existing secondary alert email.' });
   } catch (error) {

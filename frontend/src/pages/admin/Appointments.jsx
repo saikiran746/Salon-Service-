@@ -768,7 +768,7 @@ export default function AdminAppointments() {
       {/* Create Modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#0F0F0F]/95 backdrop-blur-xl border border-white/[0.08] w-full max-w-lg p-6 rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] relative overflow-hidden animate-slide-up">
+          <div className="bg-[#0F0F0F]/95 backdrop-blur-xl border border-white/[0.08] w-full max-w-lg p-6 rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] relative overflow-y-auto max-h-[85vh] animate-slide-up">
             {/* Ambient glows inside modal */}
             <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full filter blur-[50px] opacity-10 pointer-events-none bg-gold-500" />
             <div className="absolute -bottom-10 -left-10 w-40 h-40 rounded-full filter blur-[50px] opacity-5 pointer-events-none bg-gold-500" />
