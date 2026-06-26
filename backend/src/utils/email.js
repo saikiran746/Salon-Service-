@@ -27,28 +27,63 @@ const checkEmailEnv = () => {
 };
 checkEmailEnv();
 
-const verifySMTPConnection = () => {
+const testTransporterConfig = (config) => {
+  return new Promise((resolve) => {
+    const transporter = nodemailer.createTransport(config);
+    transporter.verify((error, success) => {
+      if (error) {
+        resolve({ success: false, error });
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+};
+
+const verifySMTPConnection = async () => {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.error('[EMAIL] SMTP verification skipped: Missing credentials.');
     return;
   }
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
   
-  transporter.verify((error, success) => {
-    if (error) {
-      console.error('[EMAIL] SMTP verification failed:', error);
-    } else {
-      console.log('[EMAIL] SMTP connection verified successfully');
+  const envHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const envPort = Number(process.env.SMTP_PORT); // Explicitly parsed as a Number
+  const isSecure = process.env.SMTP_SECURE === 'true';
+
+  const configsToTest = [
+    {
+      name: "Environment Config (Port 587 / TLS)",
+      host: envHost,
+      port: envPort || 587,
+      secure: envPort ? isSecure : false,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000
+    },
+    {
+      name: "Fallback Config (Port 465 / SSL)",
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000
     }
-  });
+  ];
+
+  for (const conf of configsToTest) {
+    console.log(`[EMAIL] Testing SMTP Configuration: ${conf.name}`);
+    console.log(`[EMAIL] Config Details -> host: ${conf.host}, port: ${conf.port}, secure: ${conf.secure}, connectionTimeout: ${conf.connectionTimeout}, greetingTimeout: ${conf.greetingTimeout}`);
+    
+    const result = await testTransporterConfig(conf);
+    if (result.success) {
+      console.log(`[EMAIL] SMTP connection verified successfully using ${conf.name}`);
+      // Break early if we just want to test one, but for full diagnostic logs let's test both if the first fails.
+      return; 
+    } else {
+      console.error(`[EMAIL] SMTP verification failed for ${conf.name}:`, result.error);
+    }
+  }
 };
 verifySMTPConnection();
 
@@ -264,15 +299,23 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
       return false;
     }
 
-    const transporter = nodemailer.createTransport({
+    const portParsed = Number(process.env.SMTP_PORT) || 587;
+    const isSecure = portParsed === 465 ? true : (process.env.SMTP_SECURE === 'true');
+
+    const config = {
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
+      port: portParsed,
+      secure: isSecure,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
-    });
+      connectionTimeout: 15000,
+      greetingTimeout: 15000
+    };
+
+    console.log(`[EMAIL] Final Transporter Config (excluding password): host=${config.host}, port=${config.port}, secure=${config.secure}, connectionTimeout=${config.connectionTimeout}, greetingTimeout=${config.greetingTimeout}`);
+    const transporter = nodemailer.createTransport(config);
     console.log('[EMAIL] SMTP transporter created');
 
     console.log('[EMAIL] Sending...');
