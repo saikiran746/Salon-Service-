@@ -5,8 +5,6 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const app = express();
-
-// Trust the proxy (Render, Vercel, Railway, etc.) for rate limiters
 app.set('trust proxy', 1);
 
 // Custom API request logger
