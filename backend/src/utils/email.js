@@ -27,6 +27,31 @@ const checkEmailEnv = () => {
 };
 checkEmailEnv();
 
+const verifySMTPConnection = () => {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.error('[EMAIL] SMTP verification skipped: Missing credentials.');
+    return;
+  }
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+  
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('[EMAIL] SMTP verification failed:', error);
+    } else {
+      console.log('[EMAIL] SMTP connection verified successfully');
+    }
+  });
+};
+verifySMTPConnection();
+
 const fetchEmailSettings = async () => {
   try {
     const [rows] = await pool.execute('SELECT site_name, address, phone, email FROM site_settings LIMIT 1');
