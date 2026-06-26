@@ -220,10 +220,15 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
       finalSubject = finalSubject.replace(/Luxe Salon/gi, settings.site_name || 'TONI & GUY ESSENSUALS');
     }
 
+    if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      console.error('Email send error: Missing SMTP credentials in environment variables.');
+      return false;
+    }
+
     const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -249,7 +254,7 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
     console.log(`Email sent to ${to}: ${subject}`);
     return true;
   } catch (error) {
-    console.error('Email send error:', error.message);
+    console.error('Email send error:', error);
     return false;
   }
 };
