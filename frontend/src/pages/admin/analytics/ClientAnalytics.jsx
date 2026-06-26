@@ -796,7 +796,7 @@ function NewClientsModal({ onClose }) {
                               e.stopPropagation();
                               const backendOrigin = import.meta.env.VITE_API_URL 
                                 ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') 
-                                : 'http://localhost:5000';
+                                : '';
                               window.open(`${backendOrigin}/invoices/${client.id}.pdf`, '_blank');
                             }}
                             className="flex items-center gap-1 text-[10px] text-emerald-400/50 hover:text-emerald-300 hover:underline cursor-pointer font-sans transition-colors"

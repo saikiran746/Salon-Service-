@@ -1,10 +1,10 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
-const BASE_URL = import.meta.env.VITE_API_URL || '/api';
+export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 });
@@ -30,7 +30,7 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('salon_refresh_token');
       if (refreshToken) {
         try {
-          const { data } = await axios.post(`${BASE_URL}/auth/refresh-token`, { refreshToken });
+          const { data } = await axios.post(`${API_BASE_URL}/auth/refresh-token`, { refreshToken });
           localStorage.setItem('salon_token', data.data.token);
           localStorage.setItem('salon_refresh_token', data.data.refreshToken);
           original.headers.Authorization = `Bearer ${data.data.token}`;

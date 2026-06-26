@@ -338,7 +338,7 @@ export default function AdminReports() {
                         </button>
                         <button 
                           onClick={() => {
-                            const backendOrigin = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : 'http://localhost:5000';
+                            const backendOrigin = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : '';
                             window.open(`${backendOrigin}/invoices/${b.id}.pdf`, '_blank');
                           }} 
                           className="text-salon-muted hover:text-gold-500 transition-colors flex items-center" 

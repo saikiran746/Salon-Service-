@@ -486,7 +486,7 @@ export default function AdminBilling() {
       // Open WhatsApp after bill is completely generated
       const waPhone = selectedCustomer?.phone || mobileSearch;
       if (waPhone) {
-        const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const backendUrl = import.meta.env.VITE_API_URL;
         const publicPdfUrl = `${backendUrl}/billing/${data.data.id}/pdf`;
         const paymentMethodFormatted = (finalPaymentMethod || 'CASH').toUpperCase();
         
@@ -500,7 +500,7 @@ Your invoice details:
 💳 *Payment:* ${paymentMethodFormatted}
 
 📄 *View Invoice:* ${publicPdfUrl}
-📅 *Book Next Appointment:* http://localhost:5000/appointments
+📅 *Book Next Appointment:* ${import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : ''}/appointments
 
 We hope to see you again soon! 💖
 _TONI & GUY Essensuals Team_`;
@@ -663,11 +663,11 @@ _TONI & GUY Essensuals Team_`;
                 <td className="table-cell px-6 py-4 font-display text-base text-gold-500">₹{parseFloat(b.total_amount).toLocaleString('en-IN')}</td>
                 <td className="table-cell px-6 py-4 flex gap-2">
                   <button onClick={() => downloadBillFile(b.id, b.invoice_number)} className="text-salon-muted hover:text-gold-500 transition-colors" title="Download PDF"><Download size={15} /></button>
-                   <button 
+                  <button
                     onClick={() => {
-                      const backendOrigin = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : 'http://localhost:5000';
+                      const backendOrigin = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : '';
                       window.open(`${backendOrigin}/invoices/${b.id}.pdf`, '_blank');
-                    }} 
+                    }}
                     className="text-salon-muted hover:text-gold-500 transition-colors" 
                     title="Preview invoice"
                   >
