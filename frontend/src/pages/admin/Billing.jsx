@@ -486,8 +486,8 @@ export default function AdminBilling() {
       // Open WhatsApp after bill is completely generated
       const waPhone = selectedCustomer?.phone || mobileSearch;
       if (waPhone) {
-        const backendUrl = import.meta.env.VITE_API_URL;
-        const publicPdfUrl = `${backendUrl}/billing/${data.data.id}/pdf`;
+        const frontendUrl = window.location.origin;
+        const publicPdfUrl = `${frontendUrl}/invoice/${data.data.id}`;
         const paymentMethodFormatted = (finalPaymentMethod || 'CASH').toUpperCase();
         
         const message = `Hello ${quickAddName || selectedCustomer?.name || 'Customer'}! ✨
@@ -500,7 +500,7 @@ Your invoice details:
 💳 *Payment:* ${paymentMethodFormatted}
 
 📄 *View Invoice:* ${publicPdfUrl}
-📅 *Book Next Appointment:* ${import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/api$/, '') : ''}/appointments
+📅 *Book Next Appointment:* ${frontendUrl}/book
 
 We hope to see you again soon! 💖
 _TONI & GUY Essensuals Team_`;

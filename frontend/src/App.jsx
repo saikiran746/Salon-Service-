@@ -12,6 +12,7 @@ const Services = lazy(() => import('./pages/client/Services'));
 const Memberships = lazy(() => import('./pages/client/Memberships'));
 const Gallery = lazy(() => import('./pages/client/Gallery'));
 const Contact = lazy(() => import('./pages/client/Contact'));
+const InvoiceViewer = lazy(() => import('./pages/InvoiceViewer'));
 const Login = lazy(() => import('./pages/client/Login'));
 const Register = lazy(() => import('./pages/client/Register'));
 const ForgotPassword = lazy(() => import('./pages/client/ForgotPassword'));
@@ -97,6 +98,7 @@ function AppRoutes() {
           <Route path="/memberships" element={<PageTransition><Memberships /></PageTransition>} />
           <Route path="/gallery" element={<PageTransition><Gallery /></PageTransition>} />
           <Route path="/contact" element={<PageTransition><Contact /></PageTransition>} />
+          <Route path="/invoice/:id" element={<PageTransition><InvoiceViewer /></PageTransition>} />
 
           {/* Guest Routes */}
           <Route path="/login" element={<PageTransition><GuestRoute><Login /></GuestRoute></PageTransition>} />
