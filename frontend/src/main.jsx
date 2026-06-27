@@ -7,10 +7,17 @@ import ErrorBoundary from './components/common/ErrorBoundary.jsx'
 import App from './App.jsx'
 import './index.css'
 
+const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+if (clientId) {
+  console.log(`[AUTH INFO] Google Client ID loaded (starts with ${clientId.substring(0, 8)}...)`);
+} else {
+  console.error(`[AUTH ERROR] VITE_GOOGLE_CLIENT_ID is missing in Vercel environment variables! using dummy client ID.`);
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || 'dummy_client_id'}>
+      <GoogleOAuthProvider clientId={clientId || 'dummy_client_id'}>
         <BrowserRouter>
           <App />
           <Toaster
