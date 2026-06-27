@@ -158,6 +158,11 @@ app.get('/invoices/:filename', async (req, res, next) => {
 app.use('/invoices', express.static(path.join(__dirname, '../uploads/invoices')));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+console.log('[AUTH INFO] Google OAuth Backend Configuration:');
+console.log('  - Mode: Frontend Token Verification (No Client Secret required)');
+console.log('  - Callback URL: N/A (Frontend uses popup flow)');
+console.log('  - Action Required: Ensure VITE_GOOGLE_CLIENT_ID is set in Vercel');
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' });
