@@ -1,4 +1,4 @@
-const brevo = require('@getbrevo/brevo');
+const { BrevoClient } = require('@getbrevo/brevo');
 const { pool } = require('../config/database');
 const fs = require('fs');
 
@@ -11,12 +11,16 @@ const checkEmailEnv = () => {
 };
 checkEmailEnv();
 
-let apiInstance = null;
-if (process.env.BREVO_API_KEY) {
-  const defaultClient = brevo.ApiClient.instance;
-  const apiKey = defaultClient.authentications['api-key'];
-  apiKey.apiKey = process.env.BREVO_API_KEY;
-  apiInstance = new brevo.TransactionalEmailsApi();
+let brevoClient = null;
+try {
+  if (process.env.BREVO_API_KEY) {
+    brevoClient = new BrevoClient({
+      apiKey: process.env.BREVO_API_KEY
+    });
+    console.log('[EMAIL INFO] Brevo initialized successfully');
+  }
+} catch (err) {
+  console.error('[EMAIL ERROR] Brevo initialization failed', err);
 }
 
 const fetchEmailSettings = async () => {
@@ -227,7 +231,7 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
       finalSubject = finalSubject.replace(/Luxe Salon/gi, settings.site_name || 'TONI & GUY ESSENSUALS');
     }
 
-    if (!apiInstance) {
+    if (!brevoClient) {
       console.warn('[EMAIL WARNING] BREVO_API_KEY is not set! Skipping email delivery. Dumping email info for debug:');
       console.log(`[EMAIL DUMP] To: ${targetEmail} | Subject: ${finalSubject}`);
       return true; // Return true to not break the application flow when testing locally
@@ -238,7 +242,6 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
       brevoAttachments = attachments.map(att => {
         let contentBase64;
         if (att.path) {
-          // Read from file path if Nodemailer-style 'path' is provided
           contentBase64 = fs.readFileSync(att.path).toString('base64');
         } else if (Buffer.isBuffer(att.content)) {
           contentBase64 = att.content.toString('base64');
@@ -252,22 +255,25 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
       });
     }
 
-    let sendSmtpEmail = new brevo.SendSmtpEmail();
-    sendSmtpEmail.subject = finalSubject;
-    sendSmtpEmail.htmlContent = htmlContent;
-    sendSmtpEmail.sender = { name: fromName, email: fromEmail };
-    sendSmtpEmail.to = Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }];
-    sendSmtpEmail.headers = { 'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System` };
-    
+    const emailPayload = {
+      subject: finalSubject,
+      htmlContent: htmlContent,
+      sender: { name: fromName, email: fromEmail },
+      to: Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }],
+      headers: { 'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System` }
+    };
+
     if (brevoAttachments.length > 0) {
-      sendSmtpEmail.attachment = brevoAttachments;
+      emailPayload.attachment = brevoAttachments;
     }
 
-    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    const { data: result } = await brevoClient.transactionalEmails.sendTransacEmail(emailPayload)
+      .withRawResponse();
+
     console.log(`[EMAIL] Email sent successfully (ID: ${result.messageId || 'Unknown'})`);
     return true;
   } catch (error) {
-    console.error(`[EMAIL ERROR] Failed to send email:`, error.response ? error.response.text : error.message);
+    console.error(`[EMAIL ERROR] Failed to send email:`, error.message);
     return false;
   }
 };
