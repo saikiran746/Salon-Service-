@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const db = require('../config/database');
 const { pool } = db;
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('./emailService');
 const { v4: uuidv4 } = require('uuid');
 
 const runWinBackCampaign = async () => {

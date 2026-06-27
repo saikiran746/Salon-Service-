@@ -1,18 +1,23 @@
-const { Resend } = require('resend');
-const { google } = require('googleapis');
+const brevo = require('@getbrevo/brevo');
 const { pool } = require('../config/database');
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+const fs = require('fs');
 
 const checkEmailEnv = () => {
-  console.log('[EMAIL] Checking environment variables...');
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('[EMAIL WARNING] RESEND_API_KEY is missing. Emails will be logged to the console instead of being delivered.');
+  if (!process.env.BREVO_API_KEY) {
+    console.error("[EMAIL ERROR] BREVO_API_KEY missing");
   } else {
-    console.log('[EMAIL INFO] RESEND_API_KEY is configured.');
+    console.log("[EMAIL INFO] BREVO_API_KEY configured");
   }
 };
 checkEmailEnv();
+
+let apiInstance = null;
+if (process.env.BREVO_API_KEY) {
+  const defaultClient = brevo.ApiClient.instance;
+  const apiKey = defaultClient.authentications['api-key'];
+  apiKey.apiKey = process.env.BREVO_API_KEY;
+  apiInstance = new brevo.TransactionalEmailsApi();
+}
 
 const fetchEmailSettings = async () => {
   try {
@@ -190,8 +195,6 @@ const templates = {
     <p>Thank you for choosing us to help you look and feel your absolute best! ✦</p>
     <a href="${process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? process.env.API_BASE_URL : 'http://localhost:5173')}" class="btn">BOOK YOUR SESSION NOW</a>`, settings),
 
-  // Security alert — sent to secondary_alert_email when admin credentials are changed
-  // Uses the same SMTP transport as all other emails; does NOT affect invoice/booking/login flows
   'admin-credentials-changed': (data, settings) => baseTemplate(`
     <h2 style="color:#c0392b;">⚠️ Admin Credentials Changed</h2>
     <p>This is an automated security alert from your <strong>TONI &amp; GUY Salon Management System</strong>.</p>
@@ -210,56 +213,63 @@ const templates = {
 };
 
 const sendEmail = async ({ to, subject, template, data, html, attachments }) => {
-  console.log(`[EMAIL] Attempting to send email to ${to}`);
+  const targetEmail = Array.isArray(to) ? to.join(', ') : to;
+  console.log(`[EMAIL] Sending email to ${targetEmail}`);
+  
   try {
     const settings = await fetchEmailSettings();
     const htmlContent = html || (templates[template] ? templates[template](data || {}, settings) : baseTemplate(html || '', settings));
     const fromName = process.env.EMAIL_FROM_NAME || settings.site_name || 'TONI & GUY ESSENSUALS';
-    const fromEmail = process.env.EMAIL_FROM_ADDRESS || 'onboarding@resend.dev'; // Use Resend's default testing domain if missing
+    const fromEmail = process.env.EMAIL_FROM_ADDRESS || 'essensualskondapur@gmail.com';
 
     let finalSubject = subject;
     if (finalSubject) {
       finalSubject = finalSubject.replace(/Luxe Salon/gi, settings.site_name || 'TONI & GUY ESSENSUALS');
     }
 
-    if (!process.env.RESEND_API_KEY) {
-      console.warn('[EMAIL WARNING] RESEND_API_KEY is not set! Skipping email delivery. Dumping email info for debug:');
-      console.log(`[EMAIL DUMP] To: ${to} | Subject: ${finalSubject}`);
+    if (!apiInstance) {
+      console.warn('[EMAIL WARNING] BREVO_API_KEY is not set! Skipping email delivery. Dumping email info for debug:');
+      console.log(`[EMAIL DUMP] To: ${targetEmail} | Subject: ${finalSubject}`);
       return true; // Return true to not break the application flow when testing locally
     }
 
-    console.log('[EMAIL] Sending via Resend API...');
-    const payload = {
-      from: `"${fromName}" <${fromEmail}>`,
-      to: Array.isArray(to) ? to : [to],
-      subject: finalSubject,
-      html: htmlContent,
-      headers: {
-        'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System`
-      }
-    };
-    
+    let brevoAttachments = [];
     if (attachments && attachments.length > 0) {
-      payload.attachments = attachments.map(att => ({
-        filename: att.filename,
-        content: att.content 
-      }));
+      brevoAttachments = attachments.map(att => {
+        let contentBase64;
+        if (att.path) {
+          // Read from file path if Nodemailer-style 'path' is provided
+          contentBase64 = fs.readFileSync(att.path).toString('base64');
+        } else if (Buffer.isBuffer(att.content)) {
+          contentBase64 = att.content.toString('base64');
+        } else if (typeof att.content === 'string') {
+          contentBase64 = att.content; 
+        }
+        return {
+          name: att.filename,
+          content: contentBase64
+        };
+      });
     }
 
-    const { data: resendData, error } = await resend.emails.send(payload);
-
-    if (error) {
-      console.error(`[EMAIL] Failed:`, error);
-      return false;
+    let sendSmtpEmail = new brevo.SendSmtpEmail();
+    sendSmtpEmail.subject = finalSubject;
+    sendSmtpEmail.htmlContent = htmlContent;
+    sendSmtpEmail.sender = { name: fromName, email: fromEmail };
+    sendSmtpEmail.to = Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }];
+    sendSmtpEmail.headers = { 'X-Mailer': \`\${settings.site_name || 'TONI & GUY ESSENSUALS'} System\` };
+    
+    if (brevoAttachments.length > 0) {
+      sendSmtpEmail.attachment = brevoAttachments;
     }
 
-    console.log(`[EMAIL] Success (ID: ${resendData.id})`);
+    const result = await apiInstance.sendTransacEmail(sendSmtpEmail);
+    console.log(`[EMAIL] Email sent successfully (ID: ${result.messageId || 'Unknown'})`);
     return true;
   } catch (error) {
-    console.error(`[EMAIL] Exception:`, error);
+    console.error(`[EMAIL ERROR] Failed to send email:`, error.response ? error.response.text : error.message);
     return false;
   }
 };
 
 module.exports = { sendEmail };
-

@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { pool } = require('../config/database');
 const { generateInvoicePDF } = require('../utils/invoice');
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('../services/emailService');
 
 // Helper: fetch salon settings for invoice PDF generation
 const getSalonSettings = async () => {

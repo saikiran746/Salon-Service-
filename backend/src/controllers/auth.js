@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/database');
 const { google } = require('googleapis');
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('../services/emailService');
 const { z } = require('zod');
 const sanitizeHtml = require('sanitize-html');
 

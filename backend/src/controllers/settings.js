@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const db = require('../config/database');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('../services/emailService');
 
 // In-memory cache for OTPs
 const otpCache = new Map();

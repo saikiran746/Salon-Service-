@@ -2,7 +2,7 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const { pool } = db;
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('../services/emailService');
 const { deleteFromCloudinary } = require('../middleware/upload');
 
 const membershipController = {

@@ -183,7 +183,7 @@ app.use('/api/whatsapp', require('./routes/whatsapp'));
 
 // Test email route
 app.get('/api/test-email', async (req, res) => {
-  const { sendEmail } = require('./utils/email');
+  const { sendEmail } = require('./services/emailService');
   try {
     const success = await sendEmail({
       to: 'essensualskondapur@gmail.com',

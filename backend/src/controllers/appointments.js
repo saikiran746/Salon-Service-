@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { pool } = require('../config/database');
-const { sendEmail } = require('../utils/email');
+const { sendEmail } = require('../services/emailService');
 
 const enrichAppointments = async (appointments) => {
   if (!appointments || appointments.length === 0) return appointments;
