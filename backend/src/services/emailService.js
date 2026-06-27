@@ -257,7 +257,7 @@ const sendEmail = async ({ to, subject, template, data, html, attachments }) => 
     sendSmtpEmail.htmlContent = htmlContent;
     sendSmtpEmail.sender = { name: fromName, email: fromEmail };
     sendSmtpEmail.to = Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }];
-    sendSmtpEmail.headers = { 'X-Mailer': \`\${settings.site_name || 'TONI & GUY ESSENSUALS'} System\` };
+    sendSmtpEmail.headers = { 'X-Mailer': `${settings.site_name || 'TONI & GUY ESSENSUALS'} System` };
     
     if (brevoAttachments.length > 0) {
       sendSmtpEmail.attachment = brevoAttachments;
