@@ -443,8 +443,8 @@ export default function AdminDashboard() {
                   tickFormatter={v => `₹${(v/1000).toFixed(0)}K`} />
                 <Tooltip cursor={false} content={<CustomTooltip />} />
                 <Legend verticalAlign="top" height={36} iconSize={10} wrapperStyle={{ fontSize: '10px', fontFamily: 'Raleway', color: 'rgba(255,255,255,0.4)', paddingBottom: '10px' }} />
-                <Area type="monotone" dataKey="services" stackId="1" name="Service Revenue" stroke="#C9A84C" strokeWidth={2} fill="url(#servicesGradient)" dot={false} />
-                <Area type="monotone" dataKey="memberships" stackId="1" name="Membership Revenue" stroke="#8B5CF6" strokeWidth={2} fill="url(#membershipsGradient)" dot={false} />
+                <Area type="monotone" dataKey="services" name="Service Revenue" stroke="#C9A84C" strokeWidth={2} fill="url(#servicesGradient)" dot={false} />
+                <Area type="monotone" dataKey="memberships" name="Membership Revenue" stroke="#8B5CF6" strokeWidth={2} fill="url(#membershipsGradient)" dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           </ChartCard>
